@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -125,3 +126,21 @@ class MultimodalQueryResponse(BaseModel):
     vlm_images_inspected: int = Field(default=0, ge=0, le=2)
     latency_ms: LatencyBreakdown
     citations: list[VisualCitation] = Field(default_factory=list)
+
+
+class ServiceStatus(StrEnum):
+    OK = "ok"
+    UNREACHABLE = "unreachable"
+    UNAVAILABLE = "unavailable"
+    MISSING = "missing"
+    DEGRADED = "degraded"
+
+
+class HealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["healthy", "degraded"]
+    version: str = "0.1.0"
+    services: dict[str, str]
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
