@@ -1,0 +1,1 @@
+"""OmniDoc-Vision test suite."""

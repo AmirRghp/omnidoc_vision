@@ -1,0 +1,52 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches and temporary directories
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.cache/
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment variables
+.env
+.env.local
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Build and package distribution
+dist/
+build/
+*.egg-info/
+
+# Chainlit
+.chainlit/
+
+# Data artifacts (preserve structure via .gitkeep)
+data/raw_pdfs/*
+!data/raw_pdfs/.gitkeep
+data/crops/*
+!data/crops/.gitkeep
+data/bm25_index/*
+!data/bm25_index/.gitkeep
+evals/results/*
+!evals/results/.gitkeep
