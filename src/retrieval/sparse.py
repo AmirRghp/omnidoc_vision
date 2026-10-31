@@ -62,9 +62,12 @@ class SparseRetriever:
         for record in records:
             if modality is not None and record.get("modality") != modality.value:
                 continue
-            if doc_name is not None and doc_name.strip():
-                if record.get("doc_name") != doc_name.strip():
-                    continue
+            if (
+                doc_name is not None
+                and doc_name.strip()
+                and record.get("doc_name") != doc_name.strip()
+            ):
+                continue
             filtered_records.append(record)
 
         if not filtered_records:
