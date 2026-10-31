@@ -88,6 +88,7 @@ module = [
     "bm25s.*",
     "qdrant_client.*",
     "chainlit.*",
+    "redis.*",
 ]
 ignore_missing_imports = true
 

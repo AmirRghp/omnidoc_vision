@@ -311,7 +311,7 @@ async def health_check(
 
     # 3. Redis check
     try:
-        import redis.asyncio as aioredis  # type: ignore[import-not-found]
+        import redis.asyncio as aioredis
 
         redis_client = aioredis.from_url(settings.redis_url, socket_timeout=1.0)
         await asyncio.wait_for(redis_client.ping(), timeout=1.0)

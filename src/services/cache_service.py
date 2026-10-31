@@ -64,7 +64,7 @@ class RedisCacheService:
         if self._settings.environment == "testing":
             return None
         try:
-            import redis.asyncio as aioredis  # type: ignore[import-not-found]
+            import redis.asyncio as aioredis
 
             self._redis_client = aioredis.from_url(
                 self._settings.redis_url,
