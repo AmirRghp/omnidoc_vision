@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import time
 from typing import Any, Final
@@ -141,8 +142,6 @@ class RedisCacheService:
         """Close underlying Redis connection pool if initialized."""
         self._memory_cache.clear()
         if self._redis_client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await self._redis_client.aclose()
-            except Exception:
-                pass
             self._redis_client = None

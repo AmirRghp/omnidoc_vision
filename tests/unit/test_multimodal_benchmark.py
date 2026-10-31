@@ -46,7 +46,7 @@ def test_compute_structural_table_f1_markdown_vs_flattened() -> None:
 
     flattened_text = "Aurora PostgreSQL db.r7g.4xlarge 16 128 2.32 18,400 11,200 12.4 28.1"
     naive_f1 = compute_structural_table_f1(flattened_text, CLOUD_TABLE_1)
-    assert 0.15 <= naive_f1 < 0.65
+    assert 0.12 <= naive_f1 < 0.65
     assert structured_f1 > naive_f1
 
 

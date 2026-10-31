@@ -33,8 +33,6 @@ from pydantic import BaseModel, ConfigDict
 from qdrant_client import AsyncQdrantClient
 
 from evals.run_multimodal_benchmark import (
-    _OFFLINE_APPROACH_A_FIGURE_CAPTIONS,
-    _REFERENCE_TABLES,
     DEFAULT_DATASET_PATH,
     BenchmarkVisualCaptioner,
     BenchmarkVLMService,
@@ -45,7 +43,17 @@ from evals.run_multimodal_benchmark import (
     ensure_benchmark_corpus,
     score_answer_accuracy,
 )
-from scripts.benchmark.content import CACHE_PDF, CLOUD_PDF, GPU_PDF
+from scripts.benchmark.content import (
+    CACHE_PDF,
+    CLOUD_PDF,
+    GPU_PDF,
+)
+from scripts.benchmark.content import (
+    OFFLINE_APPROACH_A_FIGURE_CAPTIONS as _OFFLINE_APPROACH_A_FIGURE_CAPTIONS,
+)
+from scripts.benchmark.content import (
+    REFERENCE_TABLES as _REFERENCE_TABLES,
+)
 from src.common.config import PROJECT_ROOT, Settings
 from src.common.logger import get_logger
 from src.graph.state import build_citations
@@ -62,9 +70,7 @@ logger = get_logger(__name__)
 DEFAULT_NOISE_OUTPUT_JSON: Final[Path] = (
     PROJECT_ROOT / "evals" / "results" / "noise_robustness.json"
 )
-DEFAULT_NOISE_OUTPUT_MD: Final[Path] = (
-    PROJECT_ROOT / "evals" / "results" / "noise_robustness.md"
-)
+DEFAULT_NOISE_OUTPUT_MD: Final[Path] = PROJECT_ROOT / "evals" / "results" / "noise_robustness.md"
 
 
 class NoiseCondition(StrEnum):
@@ -492,9 +498,7 @@ async def _evaluate_single_noise_condition(
                     routing_path = RoutingPath.FAST_TEXT_TABLE_PATH
                     gen_ms = 3.0
 
-                total_ms = round(
-                    retrieval_res.retrieval_ms + retrieval_res.rerank_ms + gen_ms, 2
-                )
+                total_ms = round(retrieval_res.retrieval_ms + retrieval_res.rerank_ms + gen_ms, 2)
                 if routing_path is RoutingPath.VISUAL_VLM_PATH:
                     visual_latencies.append(total_ms)
                 else:
@@ -535,9 +539,7 @@ async def _evaluate_single_noise_condition(
     avg_visual_acc = round(float(np.mean(visual_scores)) if visual_scores else 0.0, 4)
     avg_table_f1 = round(float(np.mean(table_scores)) if table_scores else 0.0, 4)
     avg_text_acc = round(float(np.mean(text_scores)) if text_scores else 0.0, 4)
-    avg_faithfulness = round(
-        float(np.mean(faithfulness_scores)) if faithfulness_scores else 0.0, 4
-    )
+    avg_faithfulness = round(float(np.mean(faithfulness_scores)) if faithfulness_scores else 0.0, 4)
 
     fast_p95 = compute_p95(fast_latencies)
     visual_p95 = compute_p95(visual_latencies) if visual_latencies else None
