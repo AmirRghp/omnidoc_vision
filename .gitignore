@@ -39,7 +39,8 @@ build/
 *.egg-info/
 
 # Chainlit
-.chainlit/
+.chainlit/*
+!.chainlit/config.toml
 
 # Data artifacts (preserve structure via .gitkeep)
 data/raw_pdfs/*
