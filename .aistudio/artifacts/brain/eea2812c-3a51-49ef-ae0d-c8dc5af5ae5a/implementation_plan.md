@@ -1,48 +1,47 @@
-# Task 2.1 — Docling Layout, Table Reconstruction & Figure Cropping Engine
+# Task 3.1 — Parallel Dense + Sparse Search, RRF Fusion & BGE Reranker
 
-پیاده‌سازی موتور پردازش ساختار اسناد (`DoclingParser`) برای استخراج بلوک‌های متنی با حفظ ترتیب مطالعه، بازسازی جداول ادغام‌شده (به‌صورت Markdown و HTML)، و برش تصاویر/جداول به‌همراه مختصات نرمال‌شده (`BoundingBox` در بازه `[0, 1]`) و پشتیبانی کامل از حالت Fallback آفلاین/CI بدون نیاز به وزن‌های سنگین GPU.
+پیاده‌سازی لایه بازیابی ترکیبی چندوجهی (`src/retrieval/`) شامل جستجوی موازی برداری در Qdrant (`BAAI/bge-m3` Top-20) و جستجوی واژگانی در `BM25s` (Top-20) با `asyncio.gather`، ترکیب نتایج با الگوریتم Reciprocal Rank Fusion ($k=60$)، و بازرتبه‌بندی ۱۵ کاندیدای برتر به Top-5 توسط مدل Cross-Encoder (`BAAI/bge-reranker-v2-m3` به‌همراه Fallback قطعی برای محیط‌های تست/CI).
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> بر اساس مشخصات `docs/PLAN.md`، `docs/ARCHITECTURE.md`، `docs/DATABASE.md` و `docs/SECURITY.md`، نیازمندی‌های تسک ۲.۱ کاملاً مشخص و بدون ابهام هستند. تصمیمات کلیدی زیر در طراحی لحاظ شده‌اند:
+> بر اساس مشخصات `docs/PLAN.md`، `docs/ARCHITECTURE.md`، `docs/DATABASE.md` و `docs/UX_FLOWS.md`، نیازمندی‌های تسک ۳.۱ کاملاً شفاف هستند:
 
-- **سطح پیچیدگی تسک:** **Medium** — شامل پیاده‌سازی ماژول اصلی استخراج اسناد و تست‌های واحد جامع آن بدون تغییر در اسکیمای موجود.
-- **معماری دوگانه (Docling Primary + Deterministic Fallback):** استفاده از `DocumentConverter` در `docling` (با `do_table_structure=True` و `generate_picture_images=True`) به‌عنوان موتور اصلی، همراه با Fallback مبتنی بر `pdfplumber` و `pypdf`/`Pillow` تا در محیط‌های تست/CI یا بدون مدل‌های سنگین GPU، استخراج متن، جدول (Markdown + HTML) و برش تصاویر (`.png`) به‌صورت کاملاً قطعی (Deterministic) کار کند.
-- **حفظ امنیت و محدودیت منابع (`docs/SECURITY.md`):** اعمال اعتبارسنجی حجم فایل (`max_pdf_size_mb`)، تعداد صفحات (`max_pdf_pages`)، سقف پیکسل تصویر (`PIL.Image.MAX_IMAGE_PIXELS = 25_000_000`)، و محدودسازی ابعاد تصاویر برش‌خورده به `<= max_image_dim` (`1280px`)، و ذخیره مسیر نسبی ایمن (`data/crops/...`) در `MultimodalChunk`.
+- **سطح پیچیدگی تسک:** **Medium** — شامل ۴ ماژول متمرکز در `src/retrieval/` (`dense.py`، `sparse.py`، `fusion.py`، `reranker.py`) و تست‌های واحد کامل در `tests/unit/test_retrieval.py`.
+- **اجرای موازی غیرمسدودکننده (`asyncio.gather` + `asyncio.to_thread`):** اجرای هم‌زمان جستجوی Dense و Sparse با `asyncio.gather` و انتقال عملیات محاسباتی CPU/GPU (توکنایزینگ `BM25s` و استنتاج `CrossEncoder`) به `asyncio.to_thread`.
+- **نرمال‌سازی امتیاز بازرتبه‌بندی (`rerank_score` در بازه `[0.0, 1.0]`):** امتیازهای خروجی مدل `BAAI/bge-reranker-v2-m3` (و `MockReranker` در حالت تست/CI) در بازه `[0.0, 1.0]` نرمال‌سازی می‌شوند تا با قرارداد `VisualCitation.rerank_score` در `src/schemas/api.py` و آستانه `0.35` در گره `CRAG Evaluator` (تسک ۴.۲) کاملاً سازگار باشند.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does:** یک فایل PDF مهندسی را دریافت کرده، محدودیت‌های امنیتی آن را بررسی می‌کند و خروجی را به لیستی از اشیاء استاندارد `MultimodalChunk` (`text`، `table`، `figure`) با مختصات صفحه نرمال‌شده (`BoundingBox`) و فایل‌های برش‌خورده `.png` در `data/crops/` تبدیل می‌نماید.
-- **Target Audience / Downstream Consumers:** لایه‌های بعدی پایپ‌لاین شامل `visual_captioner.py` (تسک ۲.۲)، `indexer.py` (تسک ۲.۳)، و اندپوینت `/api/v1/ingest` (تسک ۵.۱).
-- **Key Value:** جداسازی کامل تحلیل چیدمان، بازسازی ساختار جداول و استخراج تصاویر از مرحله استنتاج زمان پرسش (Query-Time Inference) با حفظ ۱۰۰٪ اطلاعات Attribution (`page_number`، `bounding_box`، `modality`، `image_path`، `table_html`).
+- **What It Does:** پرسش کاربر (فارسی یا انگلیسی) و فیلتر اختیاری مدالیته (`modality_filter: ChunkModality | str | None`) را دریافت کرده، Top-20 چانک از Qdrant و Top-20 چانک از ایندکس `BM25s` را به‌طور موازی بازیابی می‌کند، با فرمول $\text{RRF}(d) = \sum \frac{1}{k + \text{rank}(d)}$ ($k=60$) ادغام می‌نماید، ۱۵ کاندیدای اول را با `BGE-Reranker-v2-m3` بازرتبه‌بندی کرده و Top-K (پیش‌فرض ۵) چانک برتر را به‌همراه امتیاز و زمان‌بندی (`retrieval_ms`, `rerank_ms`) برمی‌گرداند.
+- **Target Audience / Downstream Consumers:** ماشین وضعیت LangGraph (`retrieve_node` و `crag_evaluate_node` در تسک ۴.۲)، اندپوینت `/api/v1/query` (تسک ۵.۱)، و بنچمارک سهلایه (تسک ۷.۱).
+- **Key Value:** ترکیب دقت معنایی `BGE-M3` با تطابق دقیق واژگان/اعداد فنی در `BM25s` بدون از دست رفتن متادیتای بصری (`bounding_box`, `image_path`, `table_html`).
 
 ---
 
-## 2. User Experience & Visual Design (System & Attribution Flow)
+## 2. User Experience & Visual Design (Retrieval & Attribution Flow)
 
-- **Key Execution Flow (Flow 1 — Ingestion):**
-  1. دریافت مسیر فایل PDF و اعتبارسنجی اولیه (موجود بودن فایل، پسوند `.pdf`، حجم `<= 50MB`، تعداد صفحات `<= 100`).
-  2. استخراج ساختار سند (عناوین بخش‌ها `section_title`، پاراگراف‌های متنی، جداول و تصاویر) به ترتیب مطالعه.
-  3. برای هر جدول: تولید هم‌زمان نسخه Markdown در فیلد `content` و ساختار کامل `<table>...</table>` در فیلد `table_html` (بدون تگ `<script`) و ذخیره اختیاری/پشتیبانی از تصویر برش‌خورده جدول.
-  4. برای هر شکل/نمودار (`figure`): ذخیره تصویر برش‌خورده با ابعاد استاندارد (`<= 1280px`) در `data/crops/{doc_id}_p{page:02d}_fig{idx:02d}.png`، ثبت مسیر نسبی `data/crops/...` در `image_path`، و مقداردهی اولیه `content` با کپشن/متادیتای شکل (که در تسک ۲.۲ توسط `VisualCaptioner` غنی‌سازی می‌شود).
-  5. نرمال‌سازی تمامی مختصات `BoundingBox` به بازه `[0.0, 1.0]` با مبدأ `CoordOrigin.TOPLEFT` و تضمین `x1 > x0` و `y1 > y0`.
+- **Key Execution Flow:**
+  1. دریافت پرسش `query`، تعداد نتایج نهایی `top_k=5`، و فیلتر اختیاری `modality_filter` (`"text" | "table" | "figure"`).
+  2. اجرای موازی `DenseRetriever.search(query, top_k=20, modality_filter=...)` و `SparseRetriever.search(query, top_k=20, modality_filter=...)` از طریق `asyncio.gather`.
+  3. ادغام لیست‌های رتبه‌بندی‌شده توسط `reciprocal_rank_fusion(dense_hits, sparse_hits, k=60, top_n=15)` با حفظ کامل شیء `MultimodalChunk`.
+  4. بازرتبه‌بندی ۱۵ کاندیدای برتر توسط `BGEReranker.rerank(query, candidates, top_k=5)` و بازگرداندن لیست نهایی `ScoredChunk` به‌ترتیب نزولی `rerank_score`.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: استراتژی اجرای Docling و Fallback قطعی (`use_docling` / Auto-Fallback)**
-  - *Chosen Approach:* کلاس `DoclingParser` در صورت فعال بودن و در دسترس بودن وزن‌های `docling` از `DocumentConverter` استفاده می‌کند و در صورت عدم دسترسی به مدل‌های محلی یا انتخاب حالت Fallback (مثلاً در تست‌های سریع CI)، به موتور Fallback داخلی مبتنی بر `pdfplumber` (برای استخراج جداول، متن، عناوین و جعبه مرزی آن‌ها) و `pypdf`/`Pillow` (برای استخراج بایت‌های تصاویر جاسازی‌شده در PDF و ذخیره در `data/crops/`) سوییچ می‌کند.
-  - *Why:* اجرای بدون خطا و سریع در محیط‌های CI/CD فاقد GPU و بدون نیاز به دانلود گیگابایت‌ها وزن مدل در تست‌های واحد (`AGENTS.md` Rule #2).
-- **Decision 2: اجرای غیرمسدودکننده (Async Non-Blocking Boundaries)**
-  - *Chosen Approach:* ارائه متد همگام `parse_pdf(pdf_path: Path) -> list[MultimodalChunk]` برای پردازش مستقیم و متد ناهمگام `aparse_pdf(pdf_path: Path) -> list[MultimodalChunk]` با استفاده از `asyncio.to_thread`.
-  - *Why:* رعایت کامل الزام `docs/CODE_STYLE.md` جهت جلوگیری از مسدود شدن Event Loop در FastAPI و Chainlit.
-- **Decision 3: فرمت شناسه‌ها و مسیرهای خروجی (`chunk_id`, `doc_id`, `image_path`)**
-  - *Chosen Approach:* تولید شناسه سند پایدار (`doc_id` از نام فایل نرمال‌شده) و شناسه‌های یکتا مانند `{doc_id}_p{page:02d}_{mod}{idx:02d}` و ذخیره `image_path` به‌صورت مسیر نسبی استاندارد `data/crops/<filename>.png` منطبق با ولیدیتورهای `MultimodalChunk`.
-  - *Why:* تضمین سازگاری با قرارداد `docs/DATABASE.md` و جلوگیری از خطای Path Traversal در `MultimodalChunk`.
+- **Decision 1: مدل داده یکپارچه برای کاندیداهای بازیابی (`ScoredChunk`)**
+  - *Chosen Approach:* تعریف مدل تغییرناپذیر `ScoredChunk(BaseModel)` شامل `chunk: MultimodalChunk`، `score: float` (امتیاز فعال در هر مرحله)، `dense_score: float | None`، `sparse_score: float | None`، `rrf_score: float | None` و `rerank_score: float | None`.
+  - *Why:* حفظ کامل شیء استاندارد `MultimodalChunk` و قابلیت ردیابی امتیاز هر مرحله برای CRAG، لاگینگ و `VisualCitation`.
+- **Decision 2: استفاده مجدد از `BaseEmbedder` و `tokenize_bilingual` از لایه `src/ingestion/indexer.py`**
+  - *Chosen Approach:* `DenseRetriever` از همان رابط `BaseEmbedder` (`BGEM3Embedder` / `MockEmbedder`) و `SparseRetriever` از همان تابع `tokenize_bilingual` و فایل `corpus_metadata.json` ایجادشده در `HybridIndexer` استفاده می‌کنند.
+  - *Why:* جلوگیری از تکرار کد و تضمین سازگاری ۱۰۰٪ بین توکنایزینگ/امبدینگ زمان ایندکس و زمان پرسش.
+- **Decision 3: معماری `BaseReranker` با `BGEReranker` و `MockReranker` قطعی**
+  - *Chosen Approach:* در محیط تولید از `FlagEmbedding.FlagReranker("BAAI/bge-reranker-v2-m3", use_fp16=...)` (با نگاشت سیگموئید به `[0.0, 1.0]`) استفاده می‌شود و در محیط تست/CI یا عدم نصب `FlagEmbedding`، به‌طور خودکار به `MockReranker` مبتنی بر هم‌پوشانی توکن‌های دوزبانه (`normalize_bilingual_text`) و امتیاز RRF سوییچ می‌گردد.
+  - *Why:* اجرای سریع و کاملاً قطعی تمام تست‌های واحد و یکپارچه‌سازی روی CPU بدون وابستگی به وزن‌های سنگین GPU (`AGENTS.md` Rule #2).
 
 ---
 
@@ -51,71 +50,78 @@
 ### Architecture & Component Diagram
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        PDF Input (data/raw_pdfs/*.pdf)                   │
-└────────────────────────────────────┬─────────────────────────────────────┘
-                                     │
-                                     ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                     PDF Security & Resource Validator                    │
-│  - Existence, File Size <= max_pdf_size_mb, Page Count <= max_pdf_pages  │
-│  - Raises: PdfValidationError / DocumentProcessingError                  │
-└────────────────────────────────────┬─────────────────────────────────────┘
-                                     │
-                    ┌────────────────┴────────────────┐
-                    ▼                                 ▼
-     ┌──────────────────────────────┐  ┌──────────────────────────────┐
-     │   Primary: IBM Docling       │  │   Fallback: PDFPlumber+PyPDF │
-     │ - PdfPipelineOptions         │  │ - Reading-order text & sects │
-     │   do_table_structure=True    │  │ - Table grid -> MD & HTML    │
-     │   generate_picture_images    │  │ - Embedded images -> PNG     │
-     └──────────────┬───────────────┘  └──────────────┬───────────────┘
-                    └────────────────┬────────────────┘
-                                     │
-                                     ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│             Normalization, Image Clamping & Asset Persistence            │
-│  - Clamp PNG dimensions <= max_image_dim (1280px) via Pillow             │
-│  - Normalize BBox [x0, y0, x1, y1] into [0.0, 1.0] (CoordOrigin.TOPLEFT) │
-│  - Emit validated list[MultimodalChunk] (TEXT, TABLE, FIGURE)            │
-└──────────────────────────────────────────────────────────────────────────┘
+                         ┌──────────────────────────────┐
+                         │  User Query + ModalityFilter │
+                         └──────────────┬───────────────┘
+                                        │
+                       ┌────────────────┴────────────────┐
+                       │         asyncio.gather          │
+                       ▼                                 ▼
+        ┌─────────────────────────────┐   ┌─────────────────────────────┐
+        │   DenseRetriever (dense.py) │   │  SparseRetriever (sparse.py)│
+        │ - Embed query via BGE-M3    │   │ - tokenize_bilingual(query) │
+        │ - Qdrant query_points Top20 │   │ - BM25s retrieve Top20      │
+        │ - Payload modality filter   │   │ - Metadata modality filter  │
+        └──────────────┬──────────────┘   └──────────────┬──────────────┘
+                       └────────────────┬────────────────┘
+                                        ▼
+                       ┌─────────────────────────────────┐
+                       │    RRF Fusion (fusion.py)       │
+                       │ - k = 60                        │
+                       │ - Deduplicate by chunk_id       │
+                       │ - Select Top-15 candidates      │
+                       └────────────────┬────────────────┘
+                                        ▼
+                       ┌─────────────────────────────────┐
+                       │   BGEReranker (reranker.py)     │
+                       │ - BAAI/bge-reranker-v2-m3       │
+                       │   (or deterministic MockRerank) │
+                       │ - Sigmoid score in [0.0, 1.0]   │
+                       │ - Return Top-5 ScoredChunk      │
+                       └─────────────────────────────────┘
 ```
 
 ### Target Files & Signatures
 
-1. **ایجاد فایل موتور پردازش (`src/ingestion/docling_parser.py`):**
-   - تنظیم `Image.MAX_IMAGE_PIXELS = 25_000_000` مطابق `docs/SECURITY.md`.
-   - کلاس `DoclingParser`:
-     - `__init__(self, settings: Settings | None = None, *, crops_dir: Path | None = None, use_docling: bool = False) -> None` (پشتیبانی از تزریق تنظیمات، مسیر ذخیره برش‌ها، و کنترل صریح یا خودکار موتور `docling` در برابر Fallback).
-     - `parse_pdf(self, pdf_path: Path | str) -> list[MultimodalChunk]`: اعتبارسنجی فایل، استخراج بلوک‌های متنی، بازسازی جداول (Markdown و HTML با حفظ ساختار)، ذخیره تصاویر برش‌خورده در `crops_dir` با تغییر اندازه به `<= max_image_dim`، و بازگرداندن لیست `MultimodalChunk`.
-     - `aparse_pdf(self, pdf_path: Path | str) -> list[MultimodalChunk]`: اجرای غیرمسدودکننده `parse_pdf` با `asyncio.to_thread`.
-   - توابع کمکی ماژولار و تایپ‌شده برای تبدیل جدول به Markdown و HTML ایمن، نرمال‌سازی مختصات صفحه به `[0.0, 1.0]` با تبدیل مبدأ `BOTTOMLEFT` به `TOPLEFT` در صورت نیاز، و برش/تغییر اندازه تصویر تا سقف `1280px`.
-2. **به‌روزرسانی صادرات پکیج (`src/ingestion/__init__.py`):**
-   - صادر کردن `DoclingParser` در `__all__`.
-3. **ایجاد تست‌های واحد (`tests/unit/test_docling_parser.py`):**
-   - تست استخراج روی فایل‌های PDF بنچمارک تولیدشده (`cloud_database_benchmark_2026.pdf` و غیره در `tmp_path`):
-     - بررسی تولید هر سه نوع چانک (`ChunkModality.TEXT`، `ChunkModality.TABLE`، `ChunkModality.FIGURE`).
-     - بررسی بازسازی جداول شامل Markdown در `content` و جدول معتبر `<table>...</table>` در `table_html`.
-     - بررسی ذخیره فایل‌های `.png` در `crops/`، نسبی بودن `image_path`، و رعایت سقف ابعاد `<= 1280px`.
-     - بررسی صحت `BoundingBox` نرمال‌شده (`0.0 <= x0 < x1 <= 1.0`، `0.0 <= y0 < y1 <= 1.0` و `coord_origin == CoordOrigin.TOPLEFT`).
-     - بررسی مدیریت خطاها (`PdfValidationError` برای فایل ناموجود، حجم بیش از حد، یا تعداد صفحات بیش از حد مجاز).
-     - بررسی کارکرد متد ناهمگام `aparse_pdf` و مسیر اقتباس از شیء خروجی `Docling` (با Mock سبک از خروجی `DocumentConverter` برای پوشش کامل کدهای مسیر Docling علاوه بر مسیر Fallback).
+1. **`src/retrieval/dense.py`:**
+   - `ScoredChunk(BaseModel)`: نگه‌دارنده `chunk: MultimodalChunk` و امتیازهای مراحل بازیابی.
+   - `DenseRetriever`:
+     - `__init__(self, settings: Settings | None = None, qdrant_client: AsyncQdrantClient | None = None, embedder: BaseEmbedder | None = None) -> None`
+     - `async def search(self, query: str, *, top_k: int = 20, modality_filter: ChunkModality | str | None = None, doc_name: str | None = None) -> list[ScoredChunk]`
+2. **`src/retrieval/sparse.py`:**
+   - `SparseRetriever`:
+     - `__init__(self, settings: Settings | None = None, *, bm25_dir: Path | None = None) -> None`
+     - `async def search(self, query: str, *, top_k: int = 20, modality_filter: ChunkModality | str | None = None, doc_name: str | None = None) -> list[ScoredChunk]`
+3. **`src/retrieval/fusion.py`:**
+   - `RRF_K_DEFAULT: Final[int] = 60`
+   - `def reciprocal_rank_fusion(ranked_lists: Sequence[Sequence[ScoredChunk]], *, k: int = 60, top_n: int = 15) -> list[ScoredChunk]`
+4. **`src/retrieval/reranker.py`:**
+   - `BaseReranker(ABC)`، `MockReranker(BaseReranker)`، `BGEReranker(BaseReranker)`
+   - `HybridRetrievalResult(BaseModel)`: شامل `chunks: list[ScoredChunk]`، `retrieval_ms: float`، `rerank_ms: float`.
+   - `HybridRetriever`: ارکستریتور سطح بالا که `DenseRetriever` و `SparseRetriever` را با `asyncio.gather(return_exceptions=False)` اجرا کرده، با `reciprocal_rank_fusion` ترکیب نموده و با `reranker.rerank` به Top-5 تبدیل می‌کند.
+5. **`src/retrieval/__init__.py`:**
+   - صادر کردن کلاس‌ها و توابع عمومی لایه بازیابی در `__all__`.
+6. **`tests/unit/test_retrieval.py`:**
+   - تست `DenseRetriever` روی Qdrant درون‌حافظه‌ای (`:memory:`) با و بدون `modality_filter` (`text`, `table`, `figure`).
+   - تست `SparseRetriever` روی ایندکس `BM25s` محلی با پرسش‌های فارسی و انگلیسی و فیلتر مدالیته.
+   - تست ریاضی دقیق `reciprocal_rank_fusion` با $k=60$، حذف تکراری‌ها (`chunk_id`)، و محدودسازی به Top-15.
+   - تست `MockReranker` و `BGEReranker` (همراه با تست Fallback زمان اجرا و نرمال‌سازی سیگموئید در `[0.0, 1.0]`).
+   - تست End-to-End کلاس `HybridRetriever` (اجرای موازی Dense + Sparse -> RRF -> Rerank به Top-5 و حفظ کامل `bounding_box`، `image_path` و `table_html`).
 
 ---
 
 ## 5. Acceptance Criteria & Verification Plan
 
 ### Acceptance Criteria
-- [ ] `DoclingParser` در `src/ingestion/docling_parser.py` پیاده‌سازی شده و هر سه مدالیته (`text`، `table`، `figure`) را در قالب `list[MultimodalChunk]` معتبر برمی‌گرداند.
-- [ ] جداول به هر دو فرمت Markdown (`content`) و HTML (`table_html`) بازسازی می‌شوند.
-- [ ] تصاویر/نمودارها در دایرکتوری `crops` به‌صورت `.png` ذخیره شده، ابعاد آن‌ها به حداکثر `1280x1280` محدود (`clamp`) می‌شود، و `image_path` به‌صورت مسیر نسبی بدون Traversal ثبت می‌گردد.
-- [ ] مختصات `BoundingBox` برای همه چانک‌ها در بازه `[0.0, 1.0]` با `CoordOrigin.TOPLEFT` نرمال‌سازی و اعتبارسنجی می‌شوند.
-- [ ] محدودیت‌های امنیتی PDF (`max_pdf_size_mb`، `max_pdf_pages`، `PIL.Image.MAX_IMAGE_PIXELS`) رعایت شده و در صورت نقض، `PdfValidationError` صادر می‌شود.
-- [ ] تمامی تست‌ها بدون نیاز به GPU یا سرویس خارجی (در حالت CI/Offline) اجرا و پاس می‌شوند.
+- [ ] بازیابی موازی Top-20 از Qdrant (`DenseRetriever`) و Top-20 از `BM25s` (`SparseRetriever`) با `asyncio.gather` پیاده‌سازی شده است.
+- [ ] فیلتر اختیاری `modality_filter` (`"text" | "table" | "figure"`) در هر دو مسیر Dense و Sparse و در `HybridRetriever` پشتیبانی می‌شود.
+- [ ] ادغام نتایج با الگوریتم Reciprocal Rank Fusion ($k=60$) و انتخاب ۱۵ کاندیدای برتر برای بازرتبه‌بندی انجام می‌شود.
+- [ ] بازرتبه‌بندی کاندیداها به Top-5 با `BAAI/bge-reranker-v2-m3` (و `MockReranker` قطعی در محیط بدون GPU/CI) با امتیاز نرمال‌شده در بازه `[0.0, 1.0]` انجام می‌شود.
+- [ ] تمامی فیلدهای Attribution (`page_number`, `bounding_box`, `modality`, `image_path`, `table_html`) بدون تغییر حفظ می‌شوند.
 
 ### Verification Commands
 ```bash
-pytest tests/unit/test_docling_parser.py -v
-ruff check src/ingestion/docling_parser.py tests/unit/test_docling_parser.py
-mypy --strict src/ingestion/docling_parser.py tests/unit/test_docling_parser.py
+pytest tests/unit/test_retrieval.py -v
+ruff check src/retrieval tests/unit/test_retrieval.py
+mypy --strict src/retrieval tests/unit/test_retrieval.py
 ```

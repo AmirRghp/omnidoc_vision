@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for Task 2.1: Docling Layout, Table Reconstruction & Figure Cropping Engine (src/ingestion/docling_parser.py and tests/unit/test_docling_parser.py) with offline CI fallback, normalized bounding boxes, lossless Markdown/HTML tables, and high-res figure/table PNG crops.",
-  "updatedAt":  "2026-10-31T09:08:28.787389336Z",
+  "summary":  "Implementation plan for Task 3.1: Parallel Dense + Sparse Search, RRF Fusion (k=60), and BGE-Reranker-v2-m3 Cross-Encoder (src/retrieval/dense.py, sparse.py, fusion.py, reranker.py, and tests/unit/test_retrieval.py).",
+  "updatedAt":  "2026-10-31T10:25:06.710021276Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
