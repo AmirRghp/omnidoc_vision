@@ -162,9 +162,12 @@ omnidoc-vision/
 │   │   ├── test_docling_parser.py          # Table & BBox extraction unit tests
 │   │   ├── test_indexer.py                 # Qdrant + BM25s hybrid indexer unit tests
 │   │   ├── test_logger.py                  # Structured JSON logging & redaction tests
-│   │   ├── test_packaging.py               # Manifest & dependency alignment guards
+│   │   ├── test_packaging.py               # Manifest, Docker, CI & README contract guards
+│   │   ├── test_retrieval.py               # Dense, Sparse BM25s, RRF & Reranker unit tests
 │   │   ├── test_schemas.py                 # MultimodalChunk & API schema contract tests
+│   │   ├── test_ui_helpers.py              # Chainlit badges, citations & crop resolver tests
 │   │   ├── test_visual_captioner.py        # Approach A VLM captioner & fallback tests
+│   │   ├── test_vlm_service.py             # vLLM multimodal client & image clamping tests
 │   │   ├── test_adaptive_router.py         # Fast Path vs Visual Path routing logic tests
 │   │   └── test_noise_transforms.py        # Synthetic PDF/image noise generator tests
 │   └── integration/
@@ -179,8 +182,6 @@ omnidoc-vision/
 ├── requirements.txt
 └── README.md
 ```
-
-`.github/workflows`, Docker artifacts, the API, and the Chainlit UI are delivered in later phases. Phase 1 includes the README, buildable package metadata, benchmark generator, and tests.
 
 ---
 

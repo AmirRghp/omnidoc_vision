@@ -34,39 +34,18 @@ from qdrant_client import AsyncQdrantClient
 from scripts.benchmark.cache import build_cache_pdf
 from scripts.benchmark.cloud import build_cloud_database_pdf
 from scripts.benchmark.content import (
-    CACHE_LFU_HIT,
-    CACHE_LRU_HIT,
     CACHE_PDF,
-    CACHE_SIZES,
-    CACHE_TABLE_1,
-    CACHE_TABLE_2,
-    CACHE_TTL_HIT,
-    CLOUD_AURORA_LATENCY,
-    CLOUD_AURORA_THROUGHPUT,
-    CLOUD_CLOUD_SQL_THROUGHPUT,
-    CLOUD_CONNECTIONS,
     CLOUD_PDF,
-    CLOUD_RDS_LATENCY,
-    CLOUD_RDS_THROUGHPUT,
-    CLOUD_TABLE_1,
-    CLOUD_TABLE_2,
-    CLOUD_THREADS,
-    GPU_AWQ_P95,
-    GPU_AWQ_THROUGHPUT,
-    GPU_AWQ_VRAM,
-    GPU_BATCHES,
-    GPU_FP16_VRAM,
     GPU_PDF,
-    GPU_TABLE_1,
-    GPU_TABLE_2,
-    GPU_VRAM_BATCHES,
+    OFFLINE_APPROACH_A_FIGURE_CAPTIONS as _OFFLINE_APPROACH_A_FIGURE_CAPTIONS,
+    REFERENCE_TABLES as _REFERENCE_TABLES,
 )
 from scripts.benchmark.dataset import build_golden_dataset
 from scripts.benchmark.gpu import build_gpu_pdf
 from src.common.config import PROJECT_ROOT, Settings
 from src.common.logger import get_logger
+from src.graph.nodes import crag_evaluate_node
 from src.graph.state import build_citations
-from src.graph.workflow import AdaptiveRAGWorkflow
 from src.ingestion.docling_parser import (
     DoclingParser,
     _clean_cell,
@@ -83,7 +62,13 @@ from src.ingestion.visual_captioner import VisualCaptioner
 from src.retrieval.dense import DenseRetriever, ScoredChunk
 from src.retrieval.reranker import HybridRetriever, MockReranker
 from src.retrieval.sparse import SparseRetriever
-from src.schemas.api import LatencyBreakdown, MultimodalQueryResponse, RoutingPath, VisualCitation
+from src.schemas.api import (
+    CRAGStatus,
+    LatencyBreakdown,
+    MultimodalQueryResponse,
+    RoutingPath,
+    VisualCitation,
+)
 from src.schemas.document import BoundingBox, ChunkModality, CoordOrigin, MultimodalChunk
 from src.services.vlm_service import VLMService, unwrap_chunk
 
@@ -95,115 +80,9 @@ DEFAULT_OUTPUT_JSON: Final[Path] = PROJECT_ROOT / "evals" / "results" / "benchma
 _WORD_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"(?u)\b\w+\b")
 _NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"\d+(?:\.\d+)?")
 _STOPWORDS: Final[frozenset[str]] = frozenset(
-    {
-        "a",
-        "an",
-        "and",
-        "are",
-        "as",
-        "at",
-        "be",
-        "by",
-        "does",
-        "for",
-        "from",
-        "has",
-        "have",
-        "how",
-        "in",
-        "is",
-        "it",
-        "its",
-        "many",
-        "much",
-        "of",
-        "on",
-        "or",
-        "that",
-        "the",
-        "to",
-        "what",
-        "which",
-        "with",
-    }
+    "a an and are as at be by does for from has have how in is it its many much of on or that "
+    "the to what which with".split()
 )
-
-# Reference tables mapped by (doc_name, page_number) for structural cell F1 evaluation
-_REFERENCE_TABLES: Final[dict[tuple[str, int], list[list[str]]]] = {
-    (CLOUD_PDF, 2): CLOUD_TABLE_1,
-    (CLOUD_PDF, 5): CLOUD_TABLE_2,
-    (CACHE_PDF, 3): CACHE_TABLE_1,
-    (CACHE_PDF, 5): CACHE_TABLE_2,
-    (GPU_PDF, 3): GPU_TABLE_1,
-    (GPU_PDF, 5): GPU_TABLE_2,
-}
-
-# Detailed Approach A technical figure captions by (doc_name, page_number) for offline mode
-_OFFLINE_APPROACH_A_FIGURE_CAPTIONS: Final[dict[tuple[str, int], str]] = {
-    (CLOUD_PDF, 3): (
-        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
-        "Title: Figure 1 - P99 Write Latency (ms) vs Concurrent Connections | "
-        "Type: Line chart | Axes: Concurrent Connections (50 to 500) vs P99 Write Latency (ms) | "
-        f"Connections: {CLOUD_CONNECTIONS} | "
-        f"Aurora PostgreSQL P99 latency series (ms): {CLOUD_AURORA_LATENCY} "
-        "(at 500 concurrent connections Aurora PostgreSQL P99 write latency is 44 ms) | "
-        f"Standard RDS P99 latency series (ms): {CLOUD_RDS_LATENCY} "
-        "(Standard RDS first exceeds 500 ms SLO threshold at 250 concurrent connections "
-        "with 620 ms, reaching 1,040 ms at 500 connections)."
-    ),
-    (CLOUD_PDF, 4): (
-        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
-        "Title: Figure 2 - Read Throughput (ops/s) vs Thread-Pool Size | "
-        "Type: Line chart | Axes: Thread-Pool Size (8 to 128 threads) vs Read Throughput (ops/s) | "
-        f"Threads: {CLOUD_THREADS} | "
-        f"Aurora PostgreSQL read throughput series (ops/sec): {CLOUD_AURORA_THROUGHPUT} "
-        "(reaches peak read throughput at 64 threads with 18,400 ops/sec) | "
-        f"Cloud SQL Enterprise series (ops/sec): {CLOUD_CLOUD_SQL_THROUGHPUT} | "
-        f"Standard RDS series (ops/sec): {CLOUD_RDS_THROUGHPUT}."
-    ),
-    (CACHE_PDF, 2): (
-        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
-        "Title: Figure 1 - Multi-AZ Six-Shard Cache Topology | "
-        "Type: Architecture topology diagram | "
-        "Components: Global TLS/RESP3 Load Balancer, 3 Stateless Shard Routers, "
-        "6 cache shards distributed across 3 Availability Zones (AZ-A, AZ-B, AZ-C), "
-        "Sentinel Control Plane | "
-        "Key Values & Inflection Points: 6 cache shards total, Replication factor 2 (RF=2) "
-        "across 3 AZs with primary and replica placement."
-    ),
-    (CACHE_PDF, 4): (
-        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
-        "Title: Figure 2 - Hit Ratio (%) vs Cache Size (GB) | "
-        "Type: Line chart | Axes: Cache Size GB (16 to 512 GB) vs Hit Ratio (%) | "
-        f"Cache Sizes (GB): {CACHE_SIZES} | "
-        f"LFU hit ratio series (%): {CACHE_LFU_HIT} "
-        "(LFU has the highest hit ratio at 256 GB cache size at 96.3%, and 91.2% at 64 GB) | "
-        f"LRU hit ratio series (%): {CACHE_LRU_HIT} "
-        "(LRU hit ratio at 64 GB cache size is 88.4%, and 94.1% at 256 GB) | "
-        f"TTL hit ratio series (%): {CACHE_TTL_HIT}."
-    ),
-    (GPU_PDF, 2): (
-        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
-        "Title: Figure 1 - AWQ 4-bit vs FP16 VRAM Footprint (GB) | "
-        "Type: Grouped bar chart | Axes: Batch Size (1, 4, 8, 16) vs VRAM Usage (GB) | "
-        f"Batch Sizes: {GPU_VRAM_BATCHES} | "
-        f"AWQ 4-bit VRAM series (GB): {GPU_AWQ_VRAM} "
-        "(AWQ uses 9.4 GB VRAM at batch size 8 and 13.1 GB at batch size 16, fitting 16 GB GPU) | "
-        f"FP16 VRAM series (GB): {GPU_FP16_VRAM} "
-        "(FP16 projected VRAM footprint at batch size 16 is 19.6 GB, which exceeds the 16 GB "
-        "GPU limit and causes OOM)."
-    ),
-    (GPU_PDF, 4): (
-        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
-        "Title: Figure 2 - AWQ Throughput (tokens/s) and P95 Latency (ms) vs Batch Size | "
-        "Type: Dual-axis line/bar chart | Axes: Batch Size (1, 2, 4, 8, 16) | "
-        f"Batch Sizes: {GPU_BATCHES} | "
-        f"AWQ Throughput series (tokens/s): {GPU_AWQ_THROUGHPUT} | "
-        f"AWQ P95 Latency series (ms): {GPU_AWQ_P95} "
-        "(AWQ P95 latency is 390 ms at batch 4 and first exceeds 500 ms at Batch size 8 "
-        "with 560 ms, reaching 920 ms at batch 16)."
-    ),
-}
 
 
 class PipelineVariant(StrEnum):
@@ -767,11 +646,6 @@ async def evaluate_variant(
             settings=settings,
             allow_visual_synthesis=(variant is PipelineVariant.OMNIDOC_VISION),
         )
-        workflow = AdaptiveRAGWorkflow(
-            retriever=hybrid_retriever,
-            vlm_service=vlm_service,
-            settings=settings,
-        )
 
         question_results: list[QuestionEvalResult] = []
         fast_latencies: list[float] = []
@@ -789,10 +663,10 @@ async def evaluate_variant(
                     top_k=5,
                     doc_name=doc_name,
                 )
+                crag_eval = await crag_evaluate_node({"retrieved_chunks": retrieval_res.chunks})
+                crag_status = crag_eval.get("crag_status", CRAGStatus.CONFIDENT)
 
                 if variant is PipelineVariant.OMNIDOC_VISION:
-                    # Route via LangGraph Adaptive Router
-                    # If the question is visual and a figure chunk is in top-5, use VISUAL_VLM_PATH
                     has_figure = any(
                         c.chunk.modality is ChunkModality.FIGURE for c in retrieval_res.chunks
                     )
@@ -818,52 +692,32 @@ async def evaluate_variant(
                         routing_path = RoutingPath.FAST_TEXT_TABLE_PATH
                         images_inspected = 0
                         gen_ms = 2.5
-
-                    total_ms = round(
-                        retrieval_res.retrieval_ms + retrieval_res.rerank_ms + gen_ms, 2
-                    )
-                    response = MultimodalQueryResponse(
-                        answer=answer,
-                        routing_path=routing_path,
-                        crag_status=(
-                            await workflow.run_query(query_en, top_k=5)
-                        ).crag_status,
-                        rewritten_query=None,
-                        vlm_images_inspected=images_inspected,
-                        latency_ms=LatencyBreakdown(
-                            retrieval_ms=retrieval_res.retrieval_ms,
-                            rerank_ms=retrieval_res.rerank_ms,
-                            generation_ms=gen_ms,
-                            total_ms=total_ms,
-                        ),
-                        citations=build_citations(retrieval_res.chunks),
-                    )
                 else:
-                    # Variants 1 and 2 operate strictly on Fast Text/Table Path
                     answer = await vlm_service.generate_fast_text(
                         query_en,
                         retrieval_res.chunks,
                     )
+                    routing_path = RoutingPath.FAST_TEXT_TABLE_PATH
+                    images_inspected = 0
                     gen_ms = 2.0
-                    total_ms = round(
-                        retrieval_res.retrieval_ms + retrieval_res.rerank_ms + gen_ms, 2
-                    )
-                    response = MultimodalQueryResponse(
-                        answer=answer,
-                        routing_path=RoutingPath.FAST_TEXT_TABLE_PATH,
-                        crag_status=(
-                            await workflow.run_query(query_en, top_k=5)
-                        ).crag_status,
-                        rewritten_query=None,
-                        vlm_images_inspected=0,
-                        latency_ms=LatencyBreakdown(
-                            retrieval_ms=retrieval_res.retrieval_ms,
-                            rerank_ms=retrieval_res.rerank_ms,
-                            generation_ms=gen_ms,
-                            total_ms=total_ms,
-                        ),
-                        citations=build_citations(retrieval_res.chunks),
-                    )
+
+                total_ms = round(
+                    retrieval_res.retrieval_ms + retrieval_res.rerank_ms + gen_ms, 2
+                )
+                response = MultimodalQueryResponse(
+                    answer=answer,
+                    routing_path=routing_path,
+                    crag_status=crag_status,
+                    rewritten_query=None,
+                    vlm_images_inspected=images_inspected,
+                    latency_ms=LatencyBreakdown(
+                        retrieval_ms=retrieval_res.retrieval_ms,
+                        rerank_ms=retrieval_res.rerank_ms,
+                        generation_ms=gen_ms,
+                        total_ms=total_ms,
+                    ),
+                    citations=build_citations(retrieval_res.chunks),
+                )
 
                 if response.routing_path is RoutingPath.VISUAL_VLM_PATH:
                     visual_latencies.append(response.latency_ms.total_ms)

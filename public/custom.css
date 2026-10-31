@@ -186,3 +186,30 @@ body {
 .reconstructed-table-container tr:hover {
   background-color: #1E293B;
 }
+
+.citation-card summary {
+  cursor: pointer;
+}
+
+.citation-card summary:focus-visible {
+  outline: 2px solid var(--color-cyan-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (max-width: 640px) {
+  .telemetry-container {
+    gap: 6px;
+  }
+
+  .route-pill,
+  .telemetry-metric,
+  .crag-badge {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+
+  .citation-card {
+    padding: 10px 12px;
+  }
+}

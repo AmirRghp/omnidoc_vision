@@ -226,3 +226,78 @@ GPU_TABLE_2: Final[list[list[str]]] = [
     ["24 GB", "16", "9.8", "64", "8,192", f"{GPU_AWQ_P95[-1]}", "Yes"],
     ["48 GB", "32", "22.0", "128", "16,384", "700", "Yes"],
 ]
+
+REFERENCE_TABLES: Final[dict[tuple[str, int], list[list[str]]]] = {
+    (CLOUD_PDF, 2): CLOUD_TABLE_1,
+    (CLOUD_PDF, 5): CLOUD_TABLE_2,
+    (CACHE_PDF, 3): CACHE_TABLE_1,
+    (CACHE_PDF, 5): CACHE_TABLE_2,
+    (GPU_PDF, 3): GPU_TABLE_1,
+    (GPU_PDF, 5): GPU_TABLE_2,
+}
+
+OFFLINE_APPROACH_A_FIGURE_CAPTIONS: Final[dict[tuple[str, int], str]] = {
+    (CLOUD_PDF, 3): (
+        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
+        "Title: Figure 1 - P99 Write Latency (ms) vs Concurrent Connections | "
+        "Type: Line chart | Axes: Concurrent Connections (50 to 500) vs P99 Write Latency (ms) | "
+        f"Connections: {CLOUD_CONNECTIONS} | "
+        f"Aurora PostgreSQL P99 latency series (ms): {CLOUD_AURORA_LATENCY} "
+        "(at 500 concurrent connections Aurora PostgreSQL P99 write latency is 44 ms) | "
+        f"Standard RDS P99 latency series (ms): {CLOUD_RDS_LATENCY} "
+        "(Standard RDS first exceeds 500 ms SLO threshold at 250 concurrent connections "
+        "with 620 ms, reaching 1,040 ms at 500 connections)."
+    ),
+    (CLOUD_PDF, 4): (
+        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
+        "Title: Figure 2 - Read Throughput (ops/s) vs Thread-Pool Size | "
+        "Type: Line chart | Axes: Thread-Pool Size (8 to 128 threads) vs Read Throughput (ops/s) | "
+        f"Threads: {CLOUD_THREADS} | "
+        f"Aurora PostgreSQL read throughput series (ops/sec): {CLOUD_AURORA_THROUGHPUT} "
+        "(reaches peak read throughput at 64 threads with 18,400 ops/sec) | "
+        f"Cloud SQL Enterprise series (ops/sec): {CLOUD_CLOUD_SQL_THROUGHPUT} | "
+        f"Standard RDS series (ops/sec): {CLOUD_RDS_THROUGHPUT}."
+    ),
+    (CACHE_PDF, 2): (
+        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
+        "Title: Figure 1 - Multi-AZ Six-Shard Cache Topology | "
+        "Type: Architecture topology diagram | "
+        "Components: Global TLS/RESP3 Load Balancer, 3 Stateless Shard Routers, "
+        "6 cache shards distributed across 3 Availability Zones (AZ-A, AZ-B, AZ-C), "
+        "Sentinel Control Plane | "
+        "Key Values & Inflection Points: 6 cache shards total, Replication factor 2 (RF=2) "
+        "across 3 AZs with primary and replica placement."
+    ),
+    (CACHE_PDF, 4): (
+        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
+        "Title: Figure 2 - Hit Ratio (%) vs Cache Size (GB) | "
+        "Type: Line chart | Axes: Cache Size GB (16 to 512 GB) vs Hit Ratio (%) | "
+        f"Cache Sizes (GB): {CACHE_SIZES} | "
+        f"LFU hit ratio series (%): {CACHE_LFU_HIT} "
+        "(LFU has the highest hit ratio at 256 GB cache size at 96.3%, and 91.2% at 64 GB) | "
+        f"LRU hit ratio series (%): {CACHE_LRU_HIT} "
+        "(LRU hit ratio at 64 GB cache size is 88.4%, and 94.1% at 256 GB) | "
+        f"TTL hit ratio series (%): {CACHE_TTL_HIT}."
+    ),
+    (GPU_PDF, 2): (
+        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
+        "Title: Figure 1 - AWQ 4-bit vs FP16 VRAM Footprint (GB) | "
+        "Type: Grouped bar chart | Axes: Batch Size (1, 4, 8, 16) vs VRAM Usage (GB) | "
+        f"Batch Sizes: {GPU_VRAM_BATCHES} | "
+        f"AWQ 4-bit VRAM series (GB): {GPU_AWQ_VRAM} "
+        "(AWQ uses 9.4 GB VRAM at batch size 8 and 13.1 GB at batch size 16, fitting 16 GB GPU) | "
+        f"FP16 VRAM series (GB): {GPU_FP16_VRAM} "
+        "(FP16 projected VRAM footprint at batch size 16 is 19.6 GB, which exceeds the 16 GB "
+        "GPU limit and causes OOM)."
+    ),
+    (GPU_PDF, 4): (
+        "[FIGURE CAPTION & TECHNICAL SUMMARY] "
+        "Title: Figure 2 - AWQ Throughput (tokens/s) and P95 Latency (ms) vs Batch Size | "
+        "Type: Dual-axis line/bar chart | Axes: Batch Size (1, 2, 4, 8, 16) | "
+        f"Batch Sizes: {GPU_BATCHES} | "
+        f"AWQ Throughput series (tokens/s): {GPU_AWQ_THROUGHPUT} | "
+        f"AWQ P95 Latency series (ms): {GPU_AWQ_P95} "
+        "(AWQ P95 latency is 390 ms at batch 4 and first exceeds 500 ms at Batch size 8 "
+        "with 560 ms, reaching 920 ms at batch 16)."
+    ),
+}

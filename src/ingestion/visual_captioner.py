@@ -7,8 +7,6 @@ dense technical summaries via Qwen2.5-VL with a deterministic offline/CI fallbac
 from __future__ import annotations
 
 import asyncio
-import base64
-import io
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final
@@ -19,11 +17,22 @@ from PIL import Image
 from src.common.config import PROJECT_ROOT, Settings, get_settings
 from src.common.exceptions import AssetAccessError
 from src.common.logger import get_logger
-from src.ingestion.docling_parser import clamp_image_dimensions
+from src.ingestion.docling_parser import (
+    clamp_image_dimensions,
+    encode_image_to_base64_sync,
+    load_pil_image_sync,
+)
 from src.schemas.document import ChunkModality, MultimodalChunk
 
 # Decompression bomb defense per docs/SECURITY.md
 Image.MAX_IMAGE_PIXELS = 25_000_000
+
+__all__ = [
+    "DEFAULT_CAPTION_PROMPT",
+    "DEFAULT_SYSTEM_PROMPT",
+    "VisualCaptioner",
+    "clamp_image_dimensions",
+]
 
 logger = get_logger(__name__)
 
@@ -47,49 +56,6 @@ DEFAULT_CAPTION_PROMPT: Final[str] = (
     "- Summary: A concise technical explanation of the engineering insight or pattern conveyed.\n"
     "Keep the output factual, structured, and free of speculative commentary."
 )
-
-
-def _encode_image_to_base64_sync(image: Image.Image, max_dim: int = 1280) -> str:
-    """Clamp image and encode to a Base64-encoded PNG string synchronously."""
-    clamped = clamp_image_dimensions(image, max_dim=max_dim)
-    buffer = io.BytesIO()
-    clamped.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-
-def _load_pil_image_sync(
-    image_input: Image.Image | Path | str,
-    *,
-    allowed_roots: Sequence[Path] | None = None,
-) -> Image.Image:
-    """Load a PIL image from an image object, Path, or string path with traversal guards."""
-    if isinstance(image_input, Image.Image):
-        return image_input.copy()
-
-    raw_path = Path(image_input)
-    if ".." in raw_path.parts:
-        raise AssetAccessError(f"Path traversal detected in image path: {image_input}")
-
-    path = raw_path
-    if not path.is_absolute() and not path.exists():
-        path = PROJECT_ROOT / raw_path
-
-    if not path.exists() or not path.is_file():
-        raise AssetAccessError(f"Image asset does not exist: {path}")
-
-    resolved = path.resolve()
-    if allowed_roots:
-        roots = [root.resolve() for root in allowed_roots]
-        if not any(resolved.is_relative_to(root) for root in roots):
-            raise AssetAccessError(
-                f"Image asset path {resolved} escapes allowed directories"
-            )
-
-    try:
-        with Image.open(resolved) as img:
-            return img.copy()
-    except Exception as exc:
-        raise AssetAccessError(f"Failed to open image asset {path}: {exc}") from exc
 
 
 class VisualCaptioner:
@@ -137,8 +103,13 @@ class VisualCaptioner:
     ) -> str:
         """Asynchronously load, clamp, and encode an image to Base64 PNG."""
         dim = max_dim or self._settings.max_image_dim
-        pil_image = await asyncio.to_thread(_load_pil_image_sync, image_input)
-        return await asyncio.to_thread(_encode_image_to_base64_sync, pil_image, dim)
+        roots = self._allowed_asset_roots()
+        pil_image = await asyncio.to_thread(
+            load_pil_image_sync,
+            image_input,
+            allowed_roots=roots,
+        )
+        return await asyncio.to_thread(encode_image_to_base64_sync, pil_image, dim)
 
     def _generate_deterministic_fallback(
         self,
@@ -177,7 +148,12 @@ class VisualCaptioner:
         metadata: dict[str, Any] | None = None,
     ) -> str:
         """Generate a dense technical caption for an image via Qwen2.5-VL or offline fallback."""
-        pil_image = await asyncio.to_thread(_load_pil_image_sync, image_input)
+        roots = self._allowed_asset_roots()
+        pil_image = await asyncio.to_thread(
+            load_pil_image_sync,
+            image_input,
+            allowed_roots=roots,
+        )
 
         if self._offline_mode or self._client is None:
             logger.info(
@@ -188,7 +164,7 @@ class VisualCaptioner:
 
         try:
             b64_data = await asyncio.to_thread(
-                _encode_image_to_base64_sync,
+                encode_image_to_base64_sync,
                 pil_image,
                 self._settings.max_image_dim,
             )

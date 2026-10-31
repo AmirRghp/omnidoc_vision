@@ -144,8 +144,19 @@ def test_build_citations_markdown_formatting() -> None:
             rerank_score=0.942,
             bounding_box=BoundingBox(page=4, x0=0.15, y0=0.25, x1=0.85, y1=0.75),
             image_url="/api/v1/crops/chk_01.png",
-            content_preview="[FIGURE] 3-node Redis cluster with sentinel failover",
-        )
+            content_preview="[FIGURE] 3-node Redis cluster with <script>alert(1)</script>",
+        ),
+        VisualCitation(
+            chunk_id="chk_tbl_02",
+            doc_name="distributed_cache.pdf",
+            page_number=2,
+            modality=ChunkModality.TABLE,
+            section_title="Throughput Table",
+            rerank_score=0.880,
+            bounding_box=BoundingBox(page=2, x0=0.10, y0=0.20, x1=0.90, y1=0.60),
+            image_url=None,
+            content_preview="| Node | QPS |\n|---|---|\n| Primary | 14,200 |",
+        ),
     ]
     md = build_citations_markdown(citations)
     assert "### 📚 مستندات و شواهد استنادشده" in md
@@ -155,6 +166,13 @@ def test_build_citations_markdown_formatting() -> None:
     assert "Cluster Topology" in md
     assert "[0.150, 0.250, 0.850, 0.750]" in md
     assert "0.942" in md
+    assert "line_chk_01" not in md
+    assert "`chk_01`" in md
+    assert "<span class='bbox-badge'>[0.150, 0.250, 0.850, 0.750]</span>" in md
+    assert "`<span class='bbox-badge'>" not in md
+    assert "<script>alert(1)</script>" not in md
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in md
+    assert "reconstructed-table-container" in md
 
 
 def test_get_starters_returns_three_starters() -> None:

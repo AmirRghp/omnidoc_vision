@@ -7,10 +7,8 @@ fallback, strict 1280px image clamping, path traversal defense, and passive prom
 from __future__ import annotations
 
 import asyncio
-import base64
 import importlib
 import importlib.util
-import io
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -20,9 +18,12 @@ from openai import AsyncOpenAI, OpenAIError
 from PIL import Image
 
 from src.common.config import PROJECT_ROOT, Settings, get_settings
-from src.common.exceptions import AssetAccessError, GenerationError
+from src.common.exceptions import GenerationError
 from src.common.logger import get_logger
-from src.ingestion.docling_parser import clamp_image_dimensions
+from src.ingestion.docling_parser import (
+    encode_image_to_base64_sync,
+    load_pil_image_sync,
+)
 from src.retrieval.dense import ScoredChunk
 from src.schemas.document import ChunkModality, MultimodalChunk
 
@@ -222,47 +223,6 @@ def format_document_evidence(chunks: Sequence[MultimodalChunk | ScoredChunk]) ->
     return "\n\n".join(blocks)
 
 
-def _encode_image_to_base64_sync(image: Image.Image, max_dim: int = 1280) -> str:
-    """Clamp image dimensions and encode to a Base64-encoded PNG string synchronously."""
-    clamped = clamp_image_dimensions(image, max_dim=max_dim)
-    buffer = io.BytesIO()
-    clamped.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-
-def _load_pil_image_sync(
-    image_input: Image.Image | Path | str,
-    *,
-    allowed_roots: Sequence[Path] | None = None,
-) -> Image.Image:
-    """Load PIL image with path traversal checks and resolution limits."""
-    if isinstance(image_input, Image.Image):
-        return image_input.copy()
-
-    raw_path = Path(image_input)
-    if ".." in raw_path.parts:
-        raise AssetAccessError(f"Path traversal detected in image path: {image_input}")
-
-    path = raw_path
-    if not path.is_absolute() and not path.exists():
-        path = PROJECT_ROOT / raw_path
-
-    if not path.exists() or not path.is_file():
-        raise AssetAccessError(f"Image asset does not exist: {path}")
-
-    resolved = path.resolve()
-    if allowed_roots:
-        roots = [r.resolve() for r in allowed_roots]
-        if not any(resolved.is_relative_to(r) for r in roots):
-            raise AssetAccessError(f"Image asset path {resolved} escapes allowed directories")
-
-    try:
-        with Image.open(resolved) as img:
-            return img.copy()
-    except Exception as exc:
-        raise AssetAccessError(f"Failed to open image asset {path}: {exc}") from exc
-
-
 class VLMService:
     """OpenAI-compatible client for Qwen2.5-VL with deterministic fallback and security guards."""
 
@@ -312,8 +272,12 @@ class VLMService:
         """Asynchronously load, clamp resolution, and Base64-encode an image asset."""
         dim = max_dim or self._settings.max_image_dim
         roots = self._allowed_asset_roots()
-        pil_image = await asyncio.to_thread(_load_pil_image_sync, image_input, allowed_roots=roots)
-        return await asyncio.to_thread(_encode_image_to_base64_sync, pil_image, dim)
+        pil_image = await asyncio.to_thread(
+            load_pil_image_sync,
+            image_input,
+            allowed_roots=roots,
+        )
+        return await asyncio.to_thread(encode_image_to_base64_sync, pil_image, dim)
 
     def _generate_deterministic_fast_text_fallback(
         self,

@@ -30,9 +30,8 @@ eval:
 build:
 	$(PYTHON) -m pip wheel . --no-deps -w dist
 
-# These targets become runnable in Phases 5 and 6.
 run-api:
-	uvicorn src.api.routes:app --reload --host 0.0.0.0 --port 8001
+	uvicorn main:app --reload --host 0.0.0.0 --port 8001
 
 run-ui:
 	chainlit run app.py -w

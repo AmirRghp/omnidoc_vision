@@ -4,15 +4,21 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 import uvicorn
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.routes import health_check
+from src.api.routes import (
+    close_cached_services,
+    get_indexer_dep,
+    get_settings_dep,
+    health_check,
+)
 from src.api.routes import router as api_v1_router
 from src.common.config import Settings, get_settings
 from src.common.exceptions import (
@@ -25,6 +31,7 @@ from src.common.exceptions import (
     RetrievalError,
 )
 from src.common.logger import get_logger
+from src.ingestion.indexer import HybridIndexer
 from src.schemas.api import HealthResponse
 
 logger = get_logger(__name__)
@@ -37,8 +44,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Initializing OmniDoc-Vision backend (env=%s)...", settings.environment)
     settings.crops_dir.mkdir(parents=True, exist_ok=True)
     settings.raw_pdfs_dir.mkdir(parents=True, exist_ok=True)
-    yield
-    logger.info("Shutting down OmniDoc-Vision backend...")
+    try:
+        yield
+    finally:
+        logger.info("Shutting down OmniDoc-Vision backend...")
+        await close_cached_services()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -77,11 +87,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tags=["Health"],
         status_code=status.HTTP_200_OK,
     )
-    async def root_health() -> HealthResponse:
-        from src.api.routes import get_indexer_dep
-
-        indexer = get_indexer_dep(active_settings)
-        return await health_check(settings=active_settings, indexer=indexer)
+    async def root_health(
+        resolved_settings: Annotated[Settings, Depends(get_settings_dep)],
+        indexer: Annotated[HybridIndexer, Depends(get_indexer_dep)],
+    ) -> HealthResponse:
+        return await health_check(settings=resolved_settings, indexer=indexer)
 
     # Custom exception handlers
     @app.exception_handler(RequestValidationError)

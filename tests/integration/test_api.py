@@ -265,8 +265,8 @@ async def test_crops_serving_success(client: httpx.AsyncClient, test_settings: S
     # Write a minimal 1x1 PNG header
     png_bytes = (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-        b"\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4"
-        b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        b"\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00"
+        b"\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
     )
     crop_path.write_bytes(png_bytes)
 
@@ -415,3 +415,27 @@ async def test_query_endpoint_validation_error(client: httpx.AsyncClient) -> Non
     assert response.status_code == 422
     err_body = response.json()
     assert err_body["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_ingest_domain_exception_returns_structured_400(
+    app_with_mocks: FastAPI,
+    client: httpx.AsyncClient,
+    test_settings: Settings,
+) -> None:
+    """Verify PdfValidationError raised inside /ingest propagates to 400 handler."""
+    from src.common.exceptions import PdfValidationError
+
+    class FailingParser:
+        async def aparse_pdf(self, pdf_path: Path | str) -> list[MultimodalChunk]:
+            raise PdfValidationError(f"Corrupted PDF header in {pdf_path}")
+
+    pdf_path = test_settings.raw_pdfs_dir / "corrupted.pdf"
+    pdf_path.write_bytes(b"%PDF-broken")
+    app_with_mocks.dependency_overrides[get_parser_dep] = lambda: FailingParser()
+
+    response = await client.post("/api/v1/ingest", json={"pdf_path": "corrupted.pdf"})
+    assert response.status_code == 400
+    err_body = response.json()
+    assert err_body["error"]["code"] == "PDF_VALIDATION_ERROR"
+    assert "Corrupted PDF header" in err_body["error"]["message"]

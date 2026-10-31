@@ -46,10 +46,16 @@ def build_telemetry_badge(response: MultimodalQueryResponse) -> str:
             f"{response.latency_ms.rerank_ms:.1f}ms</span>"
         )
 
-    telemetry_html = f"""<div class="telemetry-container">
+    score_badge = ""
+    if response.citations:
+        top_score = max(c.rerank_score for c in response.citations)
+        score_badge = f'\n  <span class="telemetry-metric">🎯 امتیاز: {top_score:.2f}</span>'
+
+    container_attrs = 'class="telemetry-container" role="region" aria-label="Query Telemetry"'
+    telemetry_html = f"""<div {container_attrs}>
   <span class="{pill_class}">{route_label}</span>
   <span class="telemetry-metric">⏱️ کل: {response.latency_ms.total_ms:.1f}ms</span>
-  {extra_metrics}
+  {extra_metrics}{score_badge}
   <span class="crag-badge {crag_class}">🎯 CRAG: {response.crag_status.value}</span>
 </div>"""
     return telemetry_html
@@ -104,21 +110,35 @@ def build_citations_markdown(citations: Sequence[VisualCitation]) -> str:
 
         section = f" — *{html.escape(cit.section_title)}*" if cit.section_title else ""
         escaped_doc = html.escape(cit.doc_name)
+        escaped_chunk_id = html.escape(cit.chunk_id)
+        escaped_preview = html.escape(cit.content_preview)
 
         summary_header = (
             f"<summary><b>{idx}. {modality_icon}</b>: "
             f"<code>{escaped_doc}</code> | صفحه {cit.page_number}{section}</summary>"
         )
 
+        if cit.modality == ChunkModality.TABLE:
+            preview_block = (
+                "<div class='reconstructed-table-container'>"
+                f"<pre class='ltr-box'>{escaped_preview}</pre>"
+                "</div>"
+            )
+        else:
+            preview_block = f"> {escaped_preview}"
+
         card_lines = [
             "<details class='citation-card'>",
             summary_header,
             "",
-            f"- **شناسه چانک:** `line_{cit.chunk_id}` | **امتیاز تطابق:** `{cit.rerank_score:.3f}`",
-            f"- **مختصات Bounding Box:** `<span class='bbox-badge'>{bbox_str}</span>`",
+            (
+                f"- **شناسه چانک:** `{escaped_chunk_id}` | "
+                f"**امتیاز تطابق:** `{cit.rerank_score:.3f}`"
+            ),
+            f"- **مختصات Bounding Box:** <span class='bbox-badge'>{bbox_str}</span>",
             "",
             "> **محتوای استخراج‌شده:**",
-            f"> {cit.content_preview}",
+            preview_block,
             "</details>",
         ]
         cards.append("\n".join(card_lines))
@@ -180,13 +200,22 @@ async def on_chat_start() -> None:
     await cl.Message(content=welcome_message).send()
 
 
+@cl.on_chat_end
+async def on_chat_end() -> None:
+    """Release workflow and Qdrant client connections when chat session closes."""
+    workflow: AdaptiveRAGWorkflow | None = cl.user_session.get("workflow")
+    if workflow is not None:
+        await workflow.close()
+
+
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
     """Handle incoming user queries and uploaded PDF documents."""
     settings: Settings = cl.user_session.get("settings") or get_settings()
-    workflow: AdaptiveRAGWorkflow = cl.user_session.get("workflow") or AdaptiveRAGWorkflow(
-        settings=settings
-    )
+    workflow: AdaptiveRAGWorkflow | None = cl.user_session.get("workflow")
+    if workflow is None:
+        workflow = AdaptiveRAGWorkflow(settings=settings)
+        cl.user_session.set("workflow", workflow)
 
     # 1. Handle uploaded PDFs if present
     if message.elements:
@@ -199,13 +228,13 @@ async def on_message(message: cl.Message) -> None:
             if is_pdf and element.path is not None:
                 pdf_path = Path(element.path)
                 status_msg = await cl.Message(
-                    content=f"⏳ در حال پردازش و استخراج سند چندوجهی: `line_{pdf_path.name}`..."
+                    content=f"⏳ در حال پردازش و استخراج سند چندوجهی: `{pdf_path.name}`..."
                 ).send()
 
+                indexer = HybridIndexer(settings=settings)
                 try:
                     parser = DoclingParser(settings=settings, crops_dir=settings.crops_dir)
                     captioner = VisualCaptioner(settings=settings)
-                    indexer = HybridIndexer(settings=settings)
 
                     chunks = await parser.aparse_pdf(pdf_path)
                     chunks = await captioner.caption_chunks(chunks)
@@ -226,8 +255,10 @@ async def on_message(message: cl.Message) -> None:
                         exc_info=True,
                     )
                     await status_msg.update(
-                        content=f"❌ خطا در پردازش سند PDF: `{exc}`"
+                        content=f"❌ خطا در پردازش سند PDF: `{html.escape(str(exc))}`"
                     )
+                finally:
+                    await indexer.close()
 
     # 2. Process query text
     query_text = (message.content or "").strip()
@@ -248,7 +279,7 @@ async def on_message(message: cl.Message) -> None:
 
     full_response_text = f"""{telemetry_html}
 
-<div class="persian-content">
+<div class="persian-content" dir="auto">
 
 {response.answer}
 

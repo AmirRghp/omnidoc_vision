@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import html
 import io
 import re
@@ -15,8 +16,12 @@ from PIL import Image
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from src.common.config import Settings, get_settings
-from src.common.exceptions import DocumentProcessingError, PdfValidationError
+from src.common.config import PROJECT_ROOT, Settings, get_settings
+from src.common.exceptions import (
+    AssetAccessError,
+    DocumentProcessingError,
+    PdfValidationError,
+)
 from src.common.logger import get_logger
 from src.schemas.document import BoundingBox, ChunkModality, CoordOrigin, MultimodalChunk
 
@@ -61,6 +66,47 @@ def clamp_image_dimensions(image: Image.Image, max_dim: int = 1280) -> Image.Ima
     new_height = max(1, round(height * scale))
     rgb_image = image.convert("RGB") if image.mode not in ("RGB", "RGBA", "L") else image
     return rgb_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+
+def encode_image_to_base64_sync(image: Image.Image, max_dim: int = 1280) -> str:
+    """Clamp image dimensions and encode to a Base64-encoded PNG string synchronously."""
+    clamped = clamp_image_dimensions(image, max_dim=max_dim)
+    buffer = io.BytesIO()
+    clamped.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+def load_pil_image_sync(
+    image_input: Image.Image | Path | str,
+    *,
+    allowed_roots: Sequence[Path] | None = None,
+) -> Image.Image:
+    """Load a PIL image from an Image object, Path, or string path with traversal guards."""
+    if isinstance(image_input, Image.Image):
+        return image_input.copy()
+
+    raw_path = Path(image_input)
+    if ".." in raw_path.parts:
+        raise AssetAccessError(f"Path traversal detected in image path: {image_input}")
+
+    path = raw_path
+    if not path.is_absolute() and not path.exists():
+        path = PROJECT_ROOT / raw_path
+
+    if not path.exists() or not path.is_file():
+        raise AssetAccessError(f"Image asset does not exist: {path}")
+
+    resolved = path.resolve()
+    if allowed_roots:
+        roots = [root.resolve() for root in allowed_roots]
+        if not any(resolved.is_relative_to(root) for root in roots):
+            raise AssetAccessError(f"Image asset path {resolved} escapes allowed directories")
+
+    try:
+        with Image.open(resolved) as img:
+            return img.copy()
+    except Exception as exc:
+        raise AssetAccessError(f"Failed to open image asset {path}: {exc}") from exc
 
 
 def normalize_bbox(

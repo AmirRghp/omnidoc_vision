@@ -33,18 +33,70 @@ class SparseRetriever:
         self._settings = settings or get_settings()
         self._bm25_dir = bm25_dir if bm25_dir is not None else Path(self._settings.bm25_index_dir)
         self._metadata_file = self._bm25_dir / "corpus_metadata.json"
+        self._cached_stat_key: tuple[int, int] | None = None
+        self._cached_records: list[dict[str, Any]] = []
+        self._index_cache: dict[
+            tuple[str | None, str | None],
+            tuple[bm25s.BM25, list[dict[str, Any]]],
+        ] = {}
 
     def _load_records_sync(self) -> list[dict[str, Any]]:
         if not self._metadata_file.exists():
+            self._cached_stat_key = None
+            self._cached_records = []
+            self._index_cache.clear()
             return []
         try:
+            stat_res = self._metadata_file.stat()
+            stat_key = (stat_res.st_mtime_ns, stat_res.st_size)
+            if self._cached_stat_key == stat_key:
+                return self._cached_records
+
             raw = self._metadata_file.read_text(encoding="utf-8")
             parsed = json.loads(raw)
-            return list(parsed) if isinstance(parsed, list) else []
+            records = list(parsed) if isinstance(parsed, list) else []
+            self._cached_stat_key = stat_key
+            self._cached_records = records
+            self._index_cache.clear()
+            return records
         except Exception as exc:
             raise RetrievalError(
                 f"Failed to read BM25 metadata from {self._metadata_file}: {exc}"
             ) from exc
+
+    def _get_or_build_index(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        modality: ChunkModality | None,
+        doc_name: str | None,
+    ) -> tuple[bm25s.BM25 | None, list[dict[str, Any]]]:
+        modality_key = modality.value if modality is not None else None
+        doc_key = doc_name.strip() if (doc_name is not None and doc_name.strip()) else None
+        cache_key = (modality_key, doc_key)
+
+        cached_entry = self._index_cache.get(cache_key)
+        if cached_entry is not None:
+            return cached_entry
+
+        filtered_records: list[dict[str, Any]] = []
+        for record in records:
+            if modality_key is not None and record.get("modality") != modality_key:
+                continue
+            if doc_key is not None and record.get("doc_name") != doc_key:
+                continue
+            filtered_records.append(record)
+
+        if not filtered_records:
+            return None, []
+
+        corpus_texts = [str(r["content"]) for r in filtered_records]
+        corpus_tokens = tokenize_bilingual(corpus_texts)
+        retriever = bm25s.BM25()
+        retriever.index(corpus_tokens)
+
+        self._index_cache[cache_key] = (retriever, filtered_records)
+        return retriever, filtered_records
 
     def _search_sync(
         self,
@@ -58,26 +110,14 @@ class SparseRetriever:
         if not records:
             return []
 
-        filtered_records: list[dict[str, Any]] = []
-        for record in records:
-            if modality is not None and record.get("modality") != modality.value:
-                continue
-            if (
-                doc_name is not None
-                and doc_name.strip()
-                and record.get("doc_name") != doc_name.strip()
-            ):
-                continue
-            filtered_records.append(record)
-
-        if not filtered_records:
-            return []
-
         try:
-            corpus_texts = [str(r["content"]) for r in filtered_records]
-            corpus_tokens = tokenize_bilingual(corpus_texts)
-            retriever = bm25s.BM25()
-            retriever.index(corpus_tokens)
+            retriever, filtered_records = self._get_or_build_index(
+                records,
+                modality=modality,
+                doc_name=doc_name,
+            )
+            if retriever is None or not filtered_records:
+                return []
 
             query_tokens = tokenize_bilingual([query])
             k_limit = min(top_k, len(filtered_records))

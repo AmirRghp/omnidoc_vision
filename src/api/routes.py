@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 
 from src.common.config import PROJECT_ROOT, Settings, get_settings
+from src.common.exceptions import OmniDocError
 from src.common.logger import get_logger
 from src.graph.workflow import AdaptiveRAGWorkflow
 from src.ingestion.docling_parser import DoclingParser
@@ -27,10 +28,35 @@ from src.schemas.api import (
     ServiceStatus,
 )
 from src.schemas.document import ChunkModality
+from src.services.cache_service import RedisCacheService, build_query_cache_key
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["OmniDoc-Vision API"])
+
+_PARSER_CACHE: dict[int, DoclingParser] = {}
+_CAPTIONER_CACHE: dict[int, VisualCaptioner] = {}
+_INDEXER_CACHE: dict[int, HybridIndexer] = {}
+_WORKFLOW_CACHE: dict[int, AdaptiveRAGWorkflow] = {}
+_CACHE_SERVICE_CACHE: dict[int, RedisCacheService] = {}
+
+
+async def close_cached_services() -> None:
+    """Close all singleton client resources held by route dependencies."""
+    for indexer in list(_INDEXER_CACHE.values()):
+        await indexer.close()
+    _INDEXER_CACHE.clear()
+
+    for workflow in list(_WORKFLOW_CACHE.values()):
+        await workflow.close()
+    _WORKFLOW_CACHE.clear()
+
+    for cache_service in list(_CACHE_SERVICE_CACHE.values()):
+        await cache_service.close()
+    _CACHE_SERVICE_CACHE.clear()
+
+    _PARSER_CACHE.clear()
+    _CAPTIONER_CACHE.clear()
 
 
 def get_settings_dep(request: Request) -> Settings:
@@ -40,25 +66,47 @@ def get_settings_dep(request: Request) -> Settings:
 
 
 def get_parser_dep(settings: Annotated[Settings, Depends(get_settings_dep)]) -> DoclingParser:
-    """Return configured DoclingParser instance."""
-    return DoclingParser(settings=settings, crops_dir=settings.crops_dir)
+    """Return singleton DoclingParser instance for active settings."""
+    key = id(settings)
+    if key not in _PARSER_CACHE:
+        _PARSER_CACHE[key] = DoclingParser(settings=settings, crops_dir=settings.crops_dir)
+    return _PARSER_CACHE[key]
 
 
 def get_captioner_dep(settings: Annotated[Settings, Depends(get_settings_dep)]) -> VisualCaptioner:
-    """Return configured VisualCaptioner instance."""
-    return VisualCaptioner(settings=settings)
+    """Return singleton VisualCaptioner instance for active settings."""
+    key = id(settings)
+    if key not in _CAPTIONER_CACHE:
+        _CAPTIONER_CACHE[key] = VisualCaptioner(settings=settings)
+    return _CAPTIONER_CACHE[key]
 
 
 def get_indexer_dep(settings: Annotated[Settings, Depends(get_settings_dep)]) -> HybridIndexer:
-    """Return configured HybridIndexer instance."""
-    return HybridIndexer(settings=settings)
+    """Return singleton HybridIndexer instance for active settings."""
+    key = id(settings)
+    if key not in _INDEXER_CACHE:
+        _INDEXER_CACHE[key] = HybridIndexer(settings=settings)
+    return _INDEXER_CACHE[key]
 
 
 def get_workflow_dep(
     settings: Annotated[Settings, Depends(get_settings_dep)],
 ) -> AdaptiveRAGWorkflow:
-    """Return configured AdaptiveRAGWorkflow instance."""
-    return AdaptiveRAGWorkflow(settings=settings)
+    """Return singleton AdaptiveRAGWorkflow instance for active settings."""
+    key = id(settings)
+    if key not in _WORKFLOW_CACHE:
+        _WORKFLOW_CACHE[key] = AdaptiveRAGWorkflow(settings=settings)
+    return _WORKFLOW_CACHE[key]
+
+
+def get_cache_dep(
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> RedisCacheService:
+    """Return singleton RedisCacheService instance for active settings."""
+    key = id(settings)
+    if key not in _CACHE_SERVICE_CACHE:
+        _CACHE_SERVICE_CACHE[key] = RedisCacheService(settings=settings)
+    return _CACHE_SERVICE_CACHE[key]
 
 
 @router.post("/ingest", response_model=IngestResponse, status_code=status.HTTP_200_OK)
@@ -68,6 +116,7 @@ async def ingest_document(
     parser: Annotated[DoclingParser, Depends(get_parser_dep)],
     captioner: Annotated[VisualCaptioner, Depends(get_captioner_dep)],
     indexer: Annotated[HybridIndexer, Depends(get_indexer_dep)],
+    cache: Annotated[RedisCacheService, Depends(get_cache_dep)],
 ) -> IngestResponse:
     """Ingest a PDF document, extract multimodal chunks, generate VLM captions, and index."""
     raw_dir = settings.raw_pdfs_dir.resolve()
@@ -119,6 +168,9 @@ async def ingest_document(
         if request.generate_vlm_captions:
             chunks = await captioner.caption_chunks(chunks)
         await indexer.index_chunks(chunks)
+        await cache.invalidate_all()
+    except OmniDocError:
+        raise
     except Exception as exc:
         logger.error("Failed to ingest %s: %s", resolved_pdf.name, exc, exc_info=True)
         raise HTTPException(
@@ -163,17 +215,34 @@ async def ingest_document(
 async def query_multimodal(
     request: MultimodalQueryRequest,
     workflow: Annotated[AdaptiveRAGWorkflow, Depends(get_workflow_dep)],
+    cache: Annotated[RedisCacheService, Depends(get_cache_dep)],
 ) -> MultimodalQueryResponse:
     """Execute hybrid retrieval, CRAG evaluation, adaptive routing, and multimodal generation."""
     logger.info("Executing multimodal query: '%s' (top_k=%d)", request.query, request.top_k)
+    cache_key = build_query_cache_key(
+        request.query,
+        request.modality_filter,
+        force_visual_route=request.force_visual_route,
+        top_k=request.top_k,
+    )
+    cached_response = await cache.get(cache_key)
+    if cached_response is not None:
+        logger.debug("Cache hit for query key %s", cache_key)
+        return cached_response
+
     try:
-        return await workflow.run_query(request)
+        response = await workflow.run_query(request)
+    except OmniDocError:
+        raise
     except Exception as exc:
         logger.error("Query execution failed: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Query execution failed: {exc}",
         ) from exc
+
+    await cache.set(cache_key, response)
+    return response
 
 
 @router.get("/crops/{crop_filename}")

@@ -37,6 +37,7 @@ Real enterprise documents are rarely clean digital PDFs. `evals/noise_robustness
 1. **Clean Digital PDF (Baseline)**
 2. **Scan Skew ($\pm 5^\circ$ rotation) + 150 DPI Compression**
 3. **Gaussian Blur ($\sigma = 1.2$) + "CONFIDENTIAL" Diagonal Watermark**
+4. **Extreme Compound Perturbation (Skew + Blur + Watermark + 150 DPI)**
 
 ---
 
