@@ -1,5 +1,5 @@
 # ==============================================================================
-# OmniDoc-Vision One-Command Stack (Qdrant, Redis, Langfuse, Auto-Ingest, API, UI)
+# OmniDoc-Vision One-Command Stack (Qdrant, Redis, Langfuse, Auto-Ingest, API, UI, VLM)
 # ==============================================================================
 name: omnidoc-vision
 
@@ -65,6 +65,29 @@ services:
       TELEMETRY_ENABLED: "false"
     restart: unless-stopped
 
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: omnidoc-vision-vllm
+    restart: unless-stopped
+    ipc: host
+    ports:
+      - "8000:8000"
+    volumes:
+      - "${HF_CACHE_DIR:-huggingface_cache}:/root/.cache/huggingface"
+    command:
+      - "${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-3B-Instruct}"
+      - "--gpu-memory-utilization"
+      - "0.75"
+      - "--max-model-len"
+      - "4096"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   init-ingest:
     build:
       context: .
@@ -81,8 +104,8 @@ services:
       QDRANT_PORT: 6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-omnidoc_vision_chunks}
       REDIS_URL: redis://redis:6379/0
-      VLM_BASE_URL: ${VLM_BASE_URL:-http://host.docker.internal:8000/v1}
-      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+      VLM_BASE_URL: ${VLM_BASE_URL:-http://vllm:8000/v1}
+      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-3B-Instruct}
       DOCLING_DEVICE: ${DOCLING_DEVICE:-cpu}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
       RERANKER_DEVICE: ${RERANKER_DEVICE:-cpu}
@@ -140,8 +163,8 @@ services:
       QDRANT_PORT: 6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-omnidoc_vision_chunks}
       REDIS_URL: redis://redis:6379/0
-      VLM_BASE_URL: ${VLM_BASE_URL:-http://host.docker.internal:8000/v1}
-      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+      VLM_BASE_URL: ${VLM_BASE_URL:-http://vllm:8000/v1}
+      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-3B-Instruct}
       DOCLING_DEVICE: ${DOCLING_DEVICE:-cpu}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
       RERANKER_DEVICE: ${RERANKER_DEVICE:-cpu}
@@ -168,8 +191,8 @@ services:
       QDRANT_PORT: 6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-omnidoc_vision_chunks}
       REDIS_URL: redis://redis:6379/0
-      VLM_BASE_URL: ${VLM_BASE_URL:-http://host.docker.internal:8000/v1}
-      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+      VLM_BASE_URL: ${VLM_BASE_URL:-http://vllm:8000/v1}
+      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-3B-Instruct}
     volumes:
       - ./data:/app/data
     command: ["chainlit", "run", "app.py", "--host", "0.0.0.0", "--port", "8002"]
@@ -179,3 +202,4 @@ volumes:
   qdrant_data:
   redis_data:
   langfuse_postgres_data:
+  huggingface_cache:
