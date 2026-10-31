@@ -1,4 +1,4 @@
-.PHONY: install lint format typecheck test test-unit clean benchmark-pdfs build run-api run-ui
+.PHONY: install lint format typecheck test test-unit clean benchmark-pdfs eval build run-api run-ui
 
 PYTHON ?= python
 
@@ -13,7 +13,7 @@ format:
 	ruff format .
 
 typecheck:
-	mypy --strict src scripts
+	mypy --strict src scripts evals
 
 test:
 	pytest tests/ -v
@@ -23,6 +23,9 @@ test-unit:
 
 benchmark-pdfs:
 	$(PYTHON) scripts/build_benchmark_pdfs.py
+
+eval:
+	$(PYTHON) -m evals.run_multimodal_benchmark --output evals/results/benchmark_report.json
 
 build:
 	$(PYTHON) -m pip wheel . --no-deps -w dist

@@ -70,7 +70,7 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["src", "evals"]
+known-first-party = ["src", "evals", "scripts"]
 
 [tool.mypy]
 python_version = "3.11"

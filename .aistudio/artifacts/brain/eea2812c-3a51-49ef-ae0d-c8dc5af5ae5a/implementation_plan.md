@@ -1,135 +1,101 @@
-# Task 4.2 — LangGraph State Machine (`CRAG Evaluator` + `Adaptive Router`)
+# Task 7.1 — Three-Way Ablation Benchmark (`PyPDF` vs. `Docling Text/Table` vs. `OmniDoc-Vision`)
 
-پیاده‌سازی ماشین وضعیت چندوجهی مبتنی بر `LangGraph` در `src/graph/` شامل گره‌های بازیابی ترکیبی (`retrieve_node`)، ارزیابی خوداصلاحگر (`crag_evaluate_node`)، بازنویسی پرسش‌های مبهم (`rewrite_query_node`)، مسیریاب تطبیقی (`adaptive_router_edge`) و دو مسیر تولید پاسخ (`fast_text_table_generation_node` برای متن/جدول و `visual_vlm_generation_node` برای تحلیل بصری نمودارها و دیاگرام‌ها با سقف ۲ تصویر).
+پیاده‌سازی بنچمارک سه‌گانه کمی (`evals/run_multimodal_benchmark.py`) و تست‌های واحد مرتبط برای ارزیابی و مقایسه سه نسخه خط لوله:
+1. **`Naive PyPDF Baseline (Text Only)`** — استخراج متن خام با `pypdf` بدون بازسازی جداول و بدون درک تصاویر/نمودارها.
+2. **`Docling Structured RAG (Text + Reconstructed Tables)`** — پارسینگ ساختاریافته با `DoclingParser` (شامل متن و بازسازی جداول ادغام‌شده Markdown/HTML) و مسیریابی سریع متنی/جدولی بدون استدلال بصری روی تصاویر (`figure`).
+3. **`OmniDoc-Vision (Docling + Adaptive Qwen2.5-VL)`** — خط لوله کامل چندوجهی شامل `DoclingParser`، کپشن‌گذاری فنی Approach A (`VisualCaptioner`)، بازیابی ترکیبی (`Qdrant BGE-M3` + `BM25s` + `RRF` + `BGE-Reranker`) و مسیریاب تطبیقی `AdaptiveRAGWorkflow` (`FAST_TEXT_TABLE_PATH` در برابر `VISUAL_VLM_PATH`).
+
+---
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> بر اساس مشخصات `docs/PLAN.md`، `docs/ARCHITECTURE.md`، `docs/UX_FLOWS.md` (Flows 2, 3, 4)، `docs/API.md` و `docs/TESTING.md`، نیازمندی‌های تسک ۴.۲ کاملاً شفاف و بدون ابهام هستند:
+> بر اساس مشخصات `docs/PLAN.md` (Task 7.1)، `docs/TESTING.md` (بخش ۲) و `docs/PRD.md` (بخش‌های ۶ و ۸)، نیازمندی‌های تسک ۷.۱ کاملاً مشخص و بدون ابهام هستند:
 
-- **سطح پیچیدگی تسک:** **Medium** — تمرکز صرفاً روی ماژول‌های گراف وضعیت در `src/graph/` و مجموعه تست‌های واحد مربوطه. (نکته: فایل‌های سرور `main.py` و `app.py` طبق `docs/PLAN.md` در فازهای ۵ و ۶ پیاده‌سازی می‌شوند و در Plan Mode هیچ فایلی تغییر نمی‌کند.)
-- **منطق تصمیم‌گیری CRAG (`CRAG_CONFIDENCE_THRESHOLD = 0.35`):** در گره `crag_evaluate_node`، اگر بیشینه امتیاز بازرتبه‌بندی (`max(rerank_score)`) کمتر از `0.35` باشد و `rewrite_count < 1` باشد، گراف به `rewrite_query_node` و سپس مجدداً به `retrieve_node` هدایت می‌شود (حداکثر ۱ بار بازنویسی برای جلوگیری از حلقه بی‌نهایت). در پایان ارزیابی، وضعیت `crag_status` روی `CONFIDENT` (در صورت `max_score >= 0.35`) یا `LOW_CONFIDENCE` تنظیم می‌گردد.
-- **مسیریابی تطبیقی (`adaptive_router_edge`):** پس از تأیید یا تکمیل چرخه CRAG، اگر `force_visual_route=True` باشد یا حداقل یک چانک در Top-K بازیابی‌شده دارای `modality == ChunkModality.FIGURE` باشد، مسیر `VISUAL_VLM_PATH` (`visual_vlm_generation_node`) انتخاب می‌شود؛ در غیر این صورت به مسیر سریع `FAST_TEXT_TABLE_PATH` (`fast_text_table_generation_node`) هدایت می‌شود.
-- **حفظ Attribution و سقف تصاویر (`max_images_per_query = 2`):** در مسیر بصری حداکثر ۲ تصویر (`vlm_images_inspected <= 2`) به `VLMService.generate_visual_reasoning` ارسال می‌شود و خروجی گراف مستقیماً قابلیت تبدیل به مدل استاندارد `MultimodalQueryResponse` (شامل `VisualCitation` با `image_url="/api/v1/crops/{filename}"`، `bounding_box` و `LatencyBreakdown`) را دارد تا در تسک ۵.۱ (`/api/v1/query`) و تسک ۶.۱ (`Chainlit UI`) بدون لایه تبدیل اضافی استفاده شود.
+- **سطح پیچیدگی تسک:** **Medium** — پیاده‌سازی ماژول بنچمارک CLI در `evals/run_multimodal_benchmark.py`، تست‌های واحد در `tests/unit/test_multimodal_benchmark.py` و به‌روزرسانی `Makefile` در صورت نیاز. (در Plan Mode هیچ فایلی تغییر نمی‌کند و منتظر تأیید شما می‌مانم.)
+- **پشتیبانی کامل از اجرای Offline / CI (قانون ۲ در `AGENTS.md`):** بنچمارک باید بدون نیاز به سرویس خارجی Qdrant یا سرور GPU vLLM، به صورت ۱۰۰٪ خودکفا با استفاده از `AsyncQdrantClient(location=":memory:")`، تولید خودکار PDFهای بنچمارک (در صورت عدم وجود در `data/raw_pdfs/`) و حالت determinisic/offline اجرا شود و تمام گیت‌های کیفیت CI (`Table Cell F1 >= 0.88`, `Visual Chart QA Accuracy >= 0.80`, `Context Recall@5 >= 0.85`, `Faithfulness >= 0.90`, `Fast Path P95 <= 500ms`, `Visual Path P95 <= 2000ms`) را محقق سازد.
+- **خروجی دوگانه (JSON + Markdown):** دستور `python -m evals.run_multimodal_benchmark --output evals/results/benchmark_report.json` هم گزارش ساختاریافته JSON (شامل خلاصه متریک‌های هر ۳ واریانت، بررسی Production CI Gates و جزئیات کامل هر ۳۰ پرسش) و هم جدول مقایسه‌ای Markdown (`benchmark_report.md`) را در `evals/results/` تولید می‌کند.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does:** پرسش کاربر و پارامترهای جستجو (`top_k`, `modality_filter`, `force_visual_route`) را در قالب وضعیت تایپ‌شده `VisionGraphState` دریافت کرده، بازیابی ترکیبی (`HybridRetriever`) را اجرا می‌کند، کیفیت شواهد را با آستانه `0.35` می‌سنجد (در صورت نیاز پرسش را بازنویسی و بازیابی را تکرار می‌کند)، و بر اساس مدالیته چانک‌های بازیابی‌شده بین مسیر سریع متنی/جدولی (`< 300ms`) و مسیر استدلال بصری VLM (`~800-1200ms`) تصمیم‌گیری می‌نماید.
-- **Target Audience / Downstream Consumers:** اندپوینت `/api/v1/query` در FastAPI (تسک ۵.۱)، رابط کاربری Chainlit (تسک ۶.۱)، و بنچمارک سه‌گانه ارزیابی (تسک ۷.۱).
-- **Key Value:** حذف سربار رمزنگاری Base64 و مصرف حافظه KV-cache روی GPU 16GB برای پرسش‌های صرفاً متنی و جدولی، درحالی‌که برای پرسش‌های نیازمند تحلیل پیکسل‌های نمودار و دیاگرام، تصاویر برش‌خورده با دقت بالا به `Qwen2.5-VL` ارسال می‌شوند.
+- **What It Does:** تمام ۳۰ پرسش دوزبانه موجود در `data/golden_multimodal_dataset.json` (شامل ۱۰ پرسش جدول پیچیده، ۱۰ پرسش بصری نمودار/دیاگرام، و ۱۰ پرسش متنی) را روی ۳ معماری مختلف اجرا و متریک‌های استاندارد مهندسی RAG چندوجهی را محاسبه و گزارش می‌کند.
+- **Target Audience:** مهندسان AI و داوران فنی که به دنبال اثبات کمی برتری معماری `OmniDoc-Vision` نسبت به `Naive PyPDF` و `Docling Text/Table` هستند.
+- **Key Value:** اثبات تجربی و قابل بازتولید (Reproducible) اینکه بازسازی جداول Docling خطای جابه‌جایی ستون‌های `PyPDF` را برطرف می‌کند (`Table F1: ~0.52 -> 0.95`) و مسیریاب تطبیقی `Qwen2.5-VL` دقت پرسش‌وپاسخ روی نمودارها را بدون تحمیل سربار تاخیر به مسیر متنی، از `~0.30 / ~0.48` به `>= 0.90` ارتقا می‌دهد.
 
 ---
 
-## 2. User Experience & Visual Design (Execution & Attribution Flows)
+## 2. User Experience & Reporting Output
 
-- **Flow A — مسیر سریع متنی و جدولی (`FAST_TEXT_TABLE_PATH`):**
-  1. بازیابی Top-5 چانک که همگی از نوع `text` یا `table` هستند با بیشینه امتیاز `>= 0.35`.
-  2. انتخاب مسیر `FAST_TEXT_TABLE_PATH` بدون بارگذاری تصویر (`vlm_images_inspected = 0`).
-  3. تولید پاسخ مستند به جدول Markdown/HTML و متن، همراه با `citations` و زمان‌بندی دقیق (`retrieval_ms`, `rerank_ms`, `generation_ms`, `total_ms`).
-- **Flow B — مسیر استدلال بصری (`VISUAL_VLM_PATH`):**
-  1. حضور حداقل یک چانک با `modality == "figure"` در Top-5 (یا فعال بودن `force_visual_route=True`).
-  2. انتخاب مسیر `VISUAL_VLM_PATH`، استخراج حداکثر ۲ مسیر تصویر یکتا از چانک‌های `figure` (یا دارای `image_path`) و فراخوانی `VLMService.generate_visual_reasoning`.
-  3. ثبت تعداد تصاویر بررسی‌شده در `vlm_images_inspected` (در بازه `0..2`) و ساخت `VisualCitation` با `image_url="/api/v1/crops/{crop_name}"`.
-- **Flow C — خوداصلاحگری CRAG (`rewrite_query_node`):**
-  1. اگر بیشینه امتیاز بازرتبه‌بندی اولیه `< 0.35` باشد و `rewrite_count == 0`، گره `rewrite_query_node` پرسش مبهم را از طریق `VLMService.rewrite_query` به پرسش غنی از کلیدواژه‌های فنی تبدیل کرده و `rewrite_count` را به `1` افزایش می‌دهد.
-  2. اجرای مجدد `retrieve_node` با پرسش بازنویسی‌شده (تجمیع زمان `retrieval_ms` و `rerank_ms`) و سپس عبور از `adaptive_router_edge`.
+- **اجرای خط فرمان (CLI):**
+  - پشتیبانی از آرگومان‌های `--output` (مسیر خروجی JSON، پیش‌فرض `evals/results/benchmark_report.json`)، `--markdown-output` (مسیر خروجی Markdown، پیش‌فرض همنام با پسوند `.md` در کنار فایل JSON) و `--dataset` (مسیر دیتاست طلایی).
+- **ساختار گزارش خروجی:**
+  1. **جدول مقایسه‌ای ۳ واریانت (Markdown & Console Summary):** نمایش دقیق متریک‌های ۶گانه در کنار آستانه‌های `Production CI Gate` مطابق جدول بخش ۲ در `docs/TESTING.md`.
+  2. **فایل JSON کامل:** شامل متادیتای اجرا، نتایج تجمیعی هر واریانت (`VariantMetrics`)، وضعیت عبور از گیت‌های CI (`passed_ci_gates: bool`) و رکوردهای تک‌تک ۳۰ پرسش (`QuestionEvalResult`) به همراه مسیر انتخاب‌شده (`FAST_TEXT_TABLE_PATH` / `VISUAL_VLM_PATH`) و citationها.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+## 3. Key Technical Decisions & Trade-Offs
 
-- **Decision 1: ساختار `VisionGraphState` مبتنی بر `TypedDict` استاندارد LangGraph**
-  - *Chosen Approach:* تعریف `VisionGraphState(TypedDict, total=False)` شامل فیلدهای ورودی (`query`, `top_k`, `modality_filter`, `force_visual_route`)، فیلدهای کنترلی CRAG (`active_query`, `rewritten_query`, `rewrite_count`, `max_rerank_score`, `crag_status`)، فیلدهای بازیابی (`retrieved_chunks`) و فیلدهای خروجی (`routing_path`, `answer`, `vlm_images_inspected`, `citations`, `retrieval_ms`, `rerank_ms`, `generation_ms`, `total_ms`).
-  - *Why:* سازگاری کامل با `StateGraph(VisionGraphState)` در `langgraph>=0.2.0` و تایپینگ سخت‌گیرانه `mypy --strict`.
-- **Decision 2: تزریق وابستگی (`Dependency Injection`) در سازنده گره‌ها و گراف**
-  - *Chosen Approach:* پیاده‌سازی کلاس/ساختار `AdaptiveRAGWorkflow` و توابع گره‌ها به‌گونه‌ای که نمونه‌های `HybridRetriever` و `VLMService` (یا پروتکل‌های معادل در تست واحد) قابل تزریق باشند.
-  - *Why:* امکان تست واحد ۱۰۰٪ ایزوله، سریع و قطعی بدون نیاز به سرورهای خارجی و همچنین استفاده آسان در FastAPI و Chainlit.
-- **Decision 3: ساخت خودکار `VisualCitation` با نگاشت امن `image_path` به `/api/v1/crops/{filename}`**
-  - *Chosen Approach:* تبدیل هر `ScoredChunk` به `VisualCitation` با استخراج نام فایل از `chunk.image_path` (`f"/api/v1/crops/{Path(chunk.image_path).name}"`) و پیش‌نمایش متنی خلاصه‌شده (`content_preview`).
-  - *Why:* انطباق کامل با اعتبارسنج‌های `VisualCitation` در قراردادهای API و حفظ زنجیره Attribution در تمام لایه‌ها (`AGENTS.md` Rule #4).
+- **Decision 1: ایزولاسیون کامل هر واریانت با `AsyncQdrantClient(location=":memory:")` و دایرکتوری موقت `BM25s`**
+  - *Chosen Approach:* هر یک از ۳ واریانت ایندکس ترکیبی مستقل خود را در حافظه و دایرکتوری مجزا می‌سازد تا چانک‌های `PyPDF`، `Docling Text/Table` و `OmniDoc-Vision` با یکدیگر تداخل نداشته باشند.
+  - *Why:* تضمین صحت علمی آزمایش Ablation و اجرای سریع و بدون وابستگی به کانتینر خارجی در محیط CI/CD و تست.
+- **Decision 2: غنی‌سازی کانتکست و استخراج پاسخ دقیق در حالت Offline برای ارزیابی واقعی خط لوله**
+  - *Chosen Approach:*
+    - در واریانت ۱ (`pypdf_baseline`): صفحات PDF صرفاً با `pypdf.PdfReader` به چانک‌های متنی خام تبدیل می‌شوند (جداول چندسطری مسطح شده و تصاویر نمودار نادیده گرفته می‌شوند).
+    - در واریانت ۲ (`docling_text_table`): چانک‌های `TEXT` و `TABLE` استخراج‌شده توسط `DoclingParser` ایندکس می‌شوند (بدون کپشن‌گذاری بصری Approach A و بدون ارسال تصویر به VLM؛ همه پرسش‌ها از مسیر سریع متنی/جدولی پاسخ داده می‌شوند).
+    - در واریانت ۳ (`omnidoc_vision`): چانک‌های `TEXT`، `TABLE` و `FIGURE` به همراه کپشن‌های فنی غنی‌شده (`VisualCaptioner`) ایندکس شده و از طریق `AdaptiveRAGWorkflow` مسیریابی می‌شوند (پرسش‌های متنی/جدولی در `FAST_TEXT_TABLE_PATH` و پرسش‌های تصویری در `VISUAL_VLM_PATH`).
+  - *Why:* بازتاب وفادارانه تفاوت معماری هر سه رویکرد روی داده‌های واقعی PDFهای تولیدشده (`cloud_database_benchmark_2026.pdf`, `distributed_cache_architecture.pdf`, `gpu_inference_capacity_report.pdf`).
+- **Decision 3: محاسبه دقیق و استاندارد متریک‌های ۶گانه**
+  - *Chosen Approach:*
+    - **`table_cell_f1`:** میانگین F1 سطح توکن/مقدار عددی و ساختار سلول روی پرسش‌های دسته `table` و مقایسه جداول بازسازی‌شده با مقادیر مرجع.
+    - **`visual_qa_accuracy`:** نرخ صحت پاسخ روی ۱۰ پرسش دسته `visual` (تطابق مقادیر کلیدی و نقاط عطف نمودار/توپولوژی با `ground_truth`).
+    - **`context_recall_at_5`:** نسبت پرسش‌هایی (از ۳۰ پرسش) که در Top-5 چانک بازیابی‌شده آن‌ها، سند و صفحه مورد انتظار (`expected_pages`) و مدالیته مرتبط حضور دارد.
+    - **`faithfulness`:** میزان مستند بودن ادعاها و اعداد پاسخ نهایی به شواهد داخل چانک‌های بازیابی‌شده (`retrieved_chunks`).
+    - **`fast_path_p95_ms` و `visual_path_p95_ms`:** صدک ۹۵ تاخیر (`percentile 95`) به تفکیک مسیر `FAST_TEXT_TABLE_PATH` و `VISUAL_VLM_PATH` (برای واریانت‌های ۱ و ۲ که مسیر بصری ندارند، `visual_path_p95_ms` برابر `None` / `N/A` ثبت می‌شود).
 
 ---
 
-## 4. Technical Architecture & Data Strategy
-
-### Architecture & State Machine Diagram
+## 4. Technical Architecture & Data Flow
 
 ```
-                     ┌────────────────────────────────────┐
-                     │        START (User Request)        │
-                     │ query, top_k, modality_filter, ... │
-                     └─────────────────┬──────────────────┘
-                                       │
-                                       ▼
-                     ┌────────────────────────────────────┐
-                     │           retrieve_node            │
-                     │ HybridRetriever.retrieve(active_q) │
-                     └─────────────────┬──────────────────┘
-                                       │
-                                       ▼
-                     ┌────────────────────────────────────┐
-                     │         crag_evaluate_node         │
-                     │ Computes max_rerank_score & status │
-                     └─────────────────┬──────────────────┘
-                                       │
-                   ┌───────────────────┴───────────────────┐
-                   │ (max_score < 0.35 & rewrite_count < 1)│ (max_score >= 0.35 OR rewrite_count >= 1)
-                   ▼                                       ▼
-     ┌───────────────────────────┐           ┌───────────────────────────┐
-     │    rewrite_query_node     │           │   adaptive_router_edge    │
-     │ VLMService.rewrite_query  │           └──────┬─────────────┬──────┘
-     │ rewrite_count += 1        │                  │             │
-     └─────────────┬─────────────┘    (No figure &  │             │ (Has figure chunk OR
-                   │                   not forced)  │             │  force_visual_route=True)
-                   └──────────────► (retrieve_node) │             │
-                                                    ▼             ▼
-                                     ┌───────────────────┐ ┌──────────────────────┐
-                                     │ fast_text_table_  │ │ visual_vlm_          │
-                                     │ generation_node   │ │ generation_node      │
-                                     │ (FAST_TEXT_TABLE) │ │ (VISUAL_VLM_PATH,    │
-                                     │ 0 images inspected│ │  <= 2 Base64 crops)  │
-                                     └─────────┬─────────┘ └──────────┬───────────┘
-                                               └──────────┬───────────┘
-                                                          ▼
-                                     ┌────────────────────────────────────┐
-                                     │   END (MultimodalQueryResponse)    │
-                                     └────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│             data/golden_multimodal_dataset.json (30 QA Pairs)           │
+│           + data/raw_pdfs/*.pdf (Auto-built if missing via script)      │
+└───────────────────┬─────────────────────────┬───────────────────────────┘
+                    │                         │
+      ┌─────────────▼─────────────┐           │           ┌─────────────────────────────┐
+      │ 1. Naive PyPDF Baseline   │           │           │ 3. OmniDoc-Vision (Full)    │
+      │ - pypdf.PdfReader text    │           │           │ - DoclingParser (Txt/Tbl/Fig│
+      │ - Hybrid Index (Qdrant+BM)│           ▼           │ - Approach A VisualCaptioner│
+      │ - Fast Text Generation    │ ┌───────────────────┐ │ - HybridRetriever + Reranker│
+      └─────────────┬─────────────┘ │ 2. Docling Struct │ │ - AdaptiveRAGWorkflow       │
+                    │               │ - Docling Text+Tbl│ │   (Fast Path vs Visual VLM) │
+                    │               │ - Fast Text/Table │ └──────────────┬──────────────┘
+                    │               └─────────┬─────────┘                │
+                    └─────────────────────────┼──────────────────────────┘
+                                              ▼
+                    ┌─────────────────────────────────────────────────────┐
+                    │         Evaluator & Metric Aggregator               │
+                    │ - Table Cell Extraction F1-Score                    │
+                    │ - Visual Chart & Diagram QA Accuracy                │
+                    │ - Overall Context Recall@5 & Answer Faithfulness    │
+                    │ - Fast Path P95 Latency & Visual Path P95 Latency   │
+                    └─────────────────────────┬───────────────────────────┘
+                                              ▼
+                    ┌─────────────────────────────────────────────────────┐
+                    │   evals/results/benchmark_report.json & .md         │
+                    └─────────────────────────────────────────────────────┘
 ```
-
-### Component & State Responsibilities
-
-1. **State Definition:**
-   - تعریف ثابت `CRAG_CONFIDENCE_THRESHOLD: Final[float] = 0.35` و `MAX_REWRITE_COUNT: Final[int] = 1`.
-   - تعریف `VisionGraphState(TypedDict, total=False)` و تابع کمکی تبدیل وضعیت نهایی به `MultimodalQueryResponse` و `VisualCitation`.
-2. **Graph Nodes & Edges:**
-   - `retrieve_node`: فراخوانی `retriever.retrieve` روی `active_query` (یا `query`) با `top_k` و `modality_filter`، ذخیره `retrieved_chunks` و انباشت زمان‌های `retrieval_ms` و `rerank_ms`.
-   - `crag_evaluate_node`: محاسبه بیشینه امتیاز بازرتبه‌بندی از `retrieved_chunks` و تعیین `crag_status` (`CONFIDENT` اگر `>= 0.35` وگرنه `LOW_CONFIDENCE`).
-   - `crag_gate_edge`: یال شرطی پس از `crag_evaluate_node` که در صورت `max_rerank_score < 0.35` و `rewrite_count < 1` به `"rewrite_query"` و در غیر این صورت به مسیر مسیریاب تطبیقی هدایت می‌کند.
-   - `rewrite_query_node`: فراخوانی `vlm_service.rewrite_query(query)`، به‌روزرسانی `rewritten_query`، `active_query` و افزایش `rewrite_count`.
-   - `adaptive_router_edge`: بررسی `force_visual_route` و مدالیته چانک‌های داخل `retrieved_chunks`؛ بازگرداندن `RoutingPath.VISUAL_VLM_PATH` در صورت وجود حداقل یک چانک `figure` یا `force_visual_route=True`، و در غیر این صورت `RoutingPath.FAST_TEXT_TABLE_PATH`.
-   - `fast_text_table_generation_node`: فراخوانی `vlm_service.generate_fast_text`، تنظیم `routing_path = RoutingPath.FAST_TEXT_TABLE_PATH`، `vlm_images_inspected = 0`، محاسبه `generation_ms` و `total_ms` و ساخت لیست `citations`.
-   - `visual_vlm_generation_node`: استخراج حداکثر ۲ مسیر تصویر یکتا از چانک‌های `figure` (یا دارای `image_path` در حالت `force_visual_route`)، فراخوانی `vlm_service.generate_visual_reasoning`، تنظیم `routing_path = RoutingPath.VISUAL_VLM_PATH`، ثبت `vlm_images_inspected` (حداکثر ۲)، محاسبه `generation_ms` و `total_ms` و ساخت لیست `citations`.
-3. **Workflow Builder & Runner:**
-   - ساخت و کامپایل `StateGraph(VisionGraphState)` با گره‌ها و یال‌های شرطی.
-   - ارائه کلاس `AdaptiveRAGWorkflow` (و تابع سازنده `build_vision_graph`) با متد `async def ainvoke_query(request: MultimodalQueryRequest) -> MultimodalQueryResponse` برای اجرای مستقیم و تایپ‌شده گراف.
-4. **Unit Testing Suite:**
-   - تست مسیریابی قطعی به `FAST_TEXT_TABLE_PATH` زمانی که چانک‌های بازیابی‌شده فقط `text` و `table` هستند (`vlm_images_inspected == 0`).
-   - تست مسیریابی قطعی به `VISUAL_VLM_PATH` زمانی که حداقل یک چانک `figure` در Top-5 حضور دارد.
-   - تست سقف حداکثر ۲ تصویر (`vlm_images_inspected == 2`) زمانی که بیش از ۲ چانک `figure` در نتایج بازیابی وجود دارد.
-   - تست `force_visual_route=True` حتی در شرایطی که چانک `figure` در نتایج نباشد.
-   - تست چرخه خوداصلاحگری CRAG: امتیاز اولیه `< 0.35` -> اجرای `rewrite_query_node` (`rewrite_count == 1`) -> بازیابی مجدد با امتیاز بالا -> تولید پاسخ با `rewritten_query` غیرتهی.
-   - تست توقف حلقه CRAG پس از ۱ بار بازنویسی حتی اگر امتیاز باز هم `< 0.35` باقی بماند (`crag_status == CRAGStatus.LOW_CONFIDENCE`).
-   - تست حفظ کامل فیلدهای Attribution (`page_number`, `bounding_box`, `modality`, `image_url`) در خروجی `MultimodalQueryResponse`.
 
 ---
 
 ## 5. Acceptance Criteria & Verification Plan
 
 ### Acceptance Criteria
-- [ ] ماشین وضعیت LangGraph شامل گره‌های `retrieve_node`، `crag_evaluate_node`، `rewrite_query_node`، `fast_text_table_generation_node` و `visual_vlm_generation_node` پیاده‌سازی شده است.
-- [ ] منطق CRAG در صورت `max_rerank_score < 0.35` و `rewrite_count < 1` پرسش را بازنویسی و بازیابی را دقیقاً یک بار تکرار می‌کند.
-- [ ] یال `adaptive_router_edge` پرسش‌های دارای چانک `figure` یا `force_visual_route=True` را به `VISUAL_VLM_PATH` (حداکثر ۲ تصویر) و سایر پرسش‌ها را به `FAST_TEXT_TABLE_PATH` هدایت می‌کند.
-- [ ] خروجی گراف تمامی فیلدهای Attribution (`page_number`, `bounding_box`, `modality`, `image_url`) و زمان‌بندی‌ها (`retrieval_ms`, `rerank_ms`, `generation_ms`, `total_ms`) را طبق قرارداد `MultimodalQueryResponse` حفظ می‌کند.
-- [ ] تمامی تست‌های واحد، بررسی‌های `ruff` و تایپ‌چکینگ `mypy --strict` بدون خطا اجرا می‌شوند.
+- [ ] اجرای `python -m evals.run_multimodal_benchmark --output evals/results/benchmark_report.json` تمامی ۳۰ پرسش `data/golden_multimodal_dataset.json` را روی هر ۳ واریانت ارزیابی کرده و فایل‌های گزارش JSON و Markdown را در `evals/results/` ذخیره می‌کند.
+- [ ] متریک‌های `Table Cell F1-Score`، `Visual Chart QA Accuracy`، `Context Recall@5`، `Faithfulness`، `Fast Path P95 Latency` و `Visual Path P95 Latency` محاسبه شده و واریانت `OmniDoc-Vision` تمامی آستانه‌های `Production CI Gate` در `docs/TESTING.md` را پاس می‌کند.
+- [ ] فیلدهای Attribution (`page_number`, `bounding_box`, `modality`, `image_url`) در نتایج ارزیابی حفظ می‌شوند.
+- [ ] تست‌های واحد در `tests/unit/test_multimodal_benchmark.py` صحت محاسبه متریک‌ها، ساختار گزارش خروجی و عملکرد CLI را پوشش می‌دهند.
+- [ ] دستورات `ruff check .`، `mypy --strict src scripts evals` و `pytest` بدون هیچ خطایی اجرا می‌شوند.
