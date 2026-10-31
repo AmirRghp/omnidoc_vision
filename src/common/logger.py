@@ -8,6 +8,28 @@ _RESERVED_ATTRS: Final[frozenset[str]] = frozenset(
     set(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
 )
 _HANDLER_NAME: Final = "omnidoc-json"
+_SENSITIVE_MARKERS: Final = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "password",
+    "secret",
+    "token",
+)
+
+
+def _redact_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _redact(key, item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    return value
+
+
+def _redact(key: str, value: Any) -> Any:
+    if any(marker in key.lower() for marker in _SENSITIVE_MARKERS):
+        return "[REDACTED]"
+    return _redact_value(value)
 
 
 class JsonFormatter(logging.Formatter):
@@ -15,7 +37,7 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
-            key: value
+            key: _redact(key, value)
             for key, value in vars(record).items()
             if key not in _RESERVED_ATTRS and not key.startswith("_")
         }
@@ -29,6 +51,8 @@ class JsonFormatter(logging.Formatter):
         )
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            payload["stack_info"] = record.stack_info
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 

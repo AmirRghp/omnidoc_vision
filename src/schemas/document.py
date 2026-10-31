@@ -1,8 +1,16 @@
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Self
+from pathlib import Path
+from typing import Annotated, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class ChunkModality(StrEnum):
@@ -16,16 +24,19 @@ class CoordOrigin(StrEnum):
     BOTTOMLEFT = "BOTTOMLEFT"
 
 
+NormalizedCoordinate = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
+
+
 class BoundingBox(BaseModel):
-    """Page-relative rectangle using [x0, y0, x1, y1] coordinates."""
+    """Normalized page-relative rectangle in [0, 1], as [x0, y0, x1, y1]."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     page: int = Field(ge=1)
-    x0: float = Field(ge=0)
-    y0: float = Field(ge=0)
-    x1: float = Field(ge=0)
-    y1: float = Field(ge=0)
+    x0: NormalizedCoordinate
+    y0: NormalizedCoordinate
+    x1: NormalizedCoordinate
+    y1: NormalizedCoordinate
     coord_origin: CoordOrigin = CoordOrigin.TOPLEFT
 
     @model_validator(mode="after")
@@ -53,6 +64,23 @@ class MultimodalChunk(BaseModel):
     image_path: str | None = Field(default=None, min_length=1)
     bounding_box: BoundingBox
     ingestion_timestamp: AwareDatetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("image_path")
+    @classmethod
+    def _validate_image_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        path = Path(value)
+        if path.is_absolute() or path.anchor or ".." in path.parts:
+            raise ValueError("image_path must be a relative path without traversal")
+        return value
+
+    @field_validator("table_html")
+    @classmethod
+    def _reject_script_html(cls, value: str | None) -> str | None:
+        if value is not None and "<script" in value.lower():
+            raise ValueError("table_html must not contain script tags")
+        return value
 
     @model_validator(mode="after")
     def _validate_payload(self) -> Self:

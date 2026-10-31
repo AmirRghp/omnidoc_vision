@@ -21,6 +21,7 @@ dependencies = [
     "Pillow>=10.4.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
+    "python-multipart>=0.0.9",
     "pydantic>=2.9.0",
     "pydantic-settings>=2.5.0",
     "qdrant-client>=1.11.0",
@@ -40,6 +41,9 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.11.0",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
 
 [tool.ruff]
 target-version = "py311"

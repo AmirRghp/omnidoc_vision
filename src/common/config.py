@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     environment: Literal["development", "testing", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     host: str = "0.0.0.0"
-    port: int = Field(default=8000, ge=1, le=65535)
+    port: int = Field(default=8001, ge=1, le=65535)
 
     vlm_base_url: str = "http://localhost:8000/v1"
     vlm_api_key: SecretStr = SecretStr("EMPTY")
@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     max_pdf_pages: int = Field(default=100, ge=1)
     max_images_per_query: int = Field(default=2, ge=0, le=2)
     docling_device: str = "cpu"
+
+    @field_validator("bm25_index_dir", "raw_pdfs_dir", "crops_dir", mode="after")
+    @classmethod
+    def _resolve_data_path(cls, value: Path) -> Path:
+        """Keep configured data paths stable regardless of the process cwd."""
+        return value if value.is_absolute() else PROJECT_ROOT / value
 
 
 @lru_cache(maxsize=1)

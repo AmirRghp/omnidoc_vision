@@ -121,7 +121,8 @@ omnidoc-vision/
 │   ├── TESTING.md
 │   └── PLAN.md
 ├── scripts/
-│   └── build_benchmark_pdfs.py             # Generates deterministic multi-page PDFs with tables & charts
+│   ├── build_benchmark_pdfs.py             # Thin deterministic corpus-generation entrypoint
+│   └── benchmark/                          # Shared content, layout, charts, documents, dataset
 ├── evals/
 │   ├── __init__.py
 │   ├── run_multimodal_benchmark.py         # Compares PyPDF vs Docling-Text vs OmniDoc-Vision
@@ -134,7 +135,7 @@ omnidoc-vision/
 │   │   ├── exceptions.py                   # Custom multimodal & parser exceptions
 │   │   └── logger.py                       # Structured JSON logger
 │   ├── schemas/
-│   │   ├── document.py                     # BoundingBox, MultimodalChunk, ModalityType enums
+│   │   ├── document.py                     # BoundingBox, MultimodalChunk, ChunkModality enums
 │   │   └── api.py                          # Request/Response & VisualCitation schemas
 │   ├── ingestion/
 │   │   ├── docling_parser.py               # IBM Docling wrapper (text, tables, figure cropping)
@@ -171,6 +172,8 @@ omnidoc-vision/
 ├── requirements.txt
 └── README.md
 ```
+
+`.github/workflows`, Docker artifacts, the API, and the Chainlit UI are delivered in later phases. Phase 1 includes the README, buildable package metadata, benchmark generator, and tests.
 
 ---
 

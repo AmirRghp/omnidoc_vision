@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.common.config import Settings, get_settings
+from src.common.config import PROJECT_ROOT, Settings, get_settings
 
 EXPECTED_FIELDS = {
     "app_name",
@@ -56,7 +56,7 @@ def test_settings_defaults_match_env_template() -> None:
     assert settings.environment == "development"
     assert settings.log_level == "INFO"
     assert settings.host == "0.0.0.0"
-    assert settings.port == 8000
+    assert settings.port == 8001
     assert settings.vlm_base_url == "http://localhost:8000/v1"
     assert settings.vlm_model_name == "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
     assert settings.vlm_temperature == 0.1
@@ -68,10 +68,10 @@ def test_settings_defaults_match_env_template() -> None:
     assert settings.qdrant_host == "localhost"
     assert settings.qdrant_port == 6333
     assert settings.qdrant_collection == "omnidoc_vision_chunks"
-    assert settings.bm25_index_dir == Path("data/bm25_index")
+    assert settings.bm25_index_dir == PROJECT_ROOT / "data/bm25_index"
     assert settings.redis_url == "redis://localhost:6379/0"
-    assert settings.raw_pdfs_dir == Path("data/raw_pdfs")
-    assert settings.crops_dir == Path("data/crops")
+    assert settings.raw_pdfs_dir == PROJECT_ROOT / "data/raw_pdfs"
+    assert settings.crops_dir == PROJECT_ROOT / "data/crops"
     assert settings.max_image_dim == 1280
     assert settings.max_pdf_size_mb == 50
     assert settings.max_pdf_pages == 100
@@ -89,6 +89,28 @@ def test_environment_variables_override_defaults(monkeypatch: pytest.MonkeyPatch
     assert settings.max_image_dim == 640
     assert settings.log_level == "DEBUG"
     assert settings.vlm_api_key.get_secret_value() == "local-secret"
+
+
+def test_env_template_loads_and_matches_settings() -> None:
+    template = PROJECT_ROOT / ".env.example"
+    settings = Settings(_env_file=template)
+
+    assert settings.port == 8001
+    assert settings.raw_pdfs_dir == PROJECT_ROOT / "data/raw_pdfs"
+    assert settings.crops_dir == PROJECT_ROOT / "data/crops"
+    assert settings.bm25_index_dir == PROJECT_ROOT / "data/bm25_index"
+
+
+def test_relative_data_paths_are_project_root_relative() -> None:
+    settings = Settings(_env_file=None, crops_dir=Path("custom/crops"))
+
+    assert settings.crops_dir == PROJECT_ROOT / "custom/crops"
+
+
+def test_absolute_data_paths_are_preserved(tmp_path: Path) -> None:
+    settings = Settings(_env_file=None, crops_dir=tmp_path)
+
+    assert settings.crops_dir == tmp_path
 
 
 def test_secret_is_redacted_in_repr() -> None:

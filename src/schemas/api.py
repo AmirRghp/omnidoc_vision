@@ -1,7 +1,15 @@
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from src.schemas.document import BoundingBox, ChunkModality
 
@@ -23,6 +31,14 @@ class IngestRequest(BaseModel):
 
     pdf_path: NonEmptyStr
     generate_vlm_captions: bool = True
+
+    @field_validator("pdf_path")
+    @classmethod
+    def _validate_pdf_path(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute() or path.anchor or ".." in path.parts:
+            raise ValueError("pdf_path must be relative to the configured PDF directory")
+        return value
 
 
 class ChunkCounts(BaseModel):
@@ -83,6 +99,13 @@ class VisualCitation(BaseModel):
     image_url: str | None = Field(default=None, min_length=1)
     content_preview: str = Field(min_length=1)
 
+    @field_validator("image_url")
+    @classmethod
+    def _validate_image_url(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith("/api/v1/crops/"):
+            raise ValueError("image_url must point at the crop endpoint")
+        return value
+
     @model_validator(mode="after")
     def _validate_citation(self) -> Self:
         if self.bounding_box.page != self.page_number:
@@ -99,6 +122,6 @@ class MultimodalQueryResponse(BaseModel):
     routing_path: RoutingPath
     crag_status: CRAGStatus
     rewritten_query: str | None = Field(default=None, min_length=1)
-    vlm_images_inspected: int = Field(default=0, ge=0)
+    vlm_images_inspected: int = Field(default=0, ge=0, le=2)
     latency_ms: LatencyBreakdown
     citations: list[VisualCitation] = Field(default_factory=list)

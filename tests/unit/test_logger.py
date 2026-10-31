@@ -48,6 +48,24 @@ def test_json_formatter_preserves_persian_text() -> None:
     assert json.loads(output)["message"] == "پاسخ نهایی آماده است"
 
 
+def test_json_formatter_redacts_sensitive_extra_fields() -> None:
+    record = _make_record()
+    record.vlm_api_key = "super-secret"
+    record.request = {"authorization": "Bearer secret"}
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["vlm_api_key"] == "[REDACTED]"
+    assert payload["request"] == {"authorization": "[REDACTED]"}
+
+
+def test_json_formatter_preserves_stack_info() -> None:
+    record = _make_record()
+    record.stack_info = "Stack (most recent call last):\n  ..."
+
+    assert json.loads(JsonFormatter().format(record))["stack_info"].startswith("Stack")
+
+
 def test_json_formatter_serializes_exceptions() -> None:
     try:
         raise RuntimeError("boom")

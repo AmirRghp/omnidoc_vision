@@ -26,7 +26,7 @@ Build a self-contained, production-hardened Multimodal RAG platform (`OmniDoc-Vi
 
 ### Secondary Goals
 - Unify all three document modalities (**Text Passages**, **Reconstructed Markdown/HTML Tables**, and **High-Res Cropped Figures/Charts**) inside a single hybrid Qdrant (`BGE-M3`) + `BM25` index using Approach A (Technical Visual Captioning + Metadata Indexing).
-- Provide visual grounding in the UI by rendering the exact cropped figure/table alongside page numbers and normalized bounding box coordinates.
+- Provide visual grounding in the UI by rendering the exact cropped figure/table alongside page numbers and normalized `[x0, y0, x1, y1]` coordinates in the range `[0, 1]`.
 - Quantitatively benchmark pipeline robustness against synthetic document degradation (scan skew, blur, watermarks) and compare against naive PDF parsers.
 
 ---
@@ -42,7 +42,7 @@ Build a self-contained, production-hardened Multimodal RAG platform (`OmniDoc-Vi
 ---
 
 ## 5. User Stories
-- **US-01 (Complex Merged-Cell Table QA):** As an engineer, I want to ask a question about a multi-header benchmark table (in Persian or English, e.g., *"در جدول بنچمارک صفحه ۴، توان عملیاتی دیتابیس در حالت ۶۴ رشته و کش فعال چقدر است؟"*) and get the exact numeric value without column-shift hallucinations.
+- **US-01 (Complex Merged-Cell Table QA):** As an engineer, I want to ask a question about a multi-header benchmark table (in Persian or English, e.g., *"در جدول بنچمارک صفحه ۲، توان عملیاتی دیتابیس در حالت ۶۴ رشته و کش فعال چقدر است؟"*) and get the exact numeric value without column-shift hallucinations.
 - **US-02 (Direct Chart & Diagram Reasoning):** As an architect, I want to ask about a visual trend or network diagram (e.g., *"بر اساس نمودار تاخیر P99، در چه تعداد اتصالی، زمان پاسخ‌دهی از مرز ۵۰۰ میلی‌ثانیه عبور می‌کند؟"*) so the system automatically routes the cropped chart image to `Qwen2.5-VL` and explains the visual inflection point.
 - **US-03 (Visual Grounding & Bounding Box Attribution):** As a user, I want every answer to display the cropped chart or table image inline in the chat along with the source PDF filename, page number, and bounding box `[x0, y0, x1, y1]`.
 - **US-04 (Adaptive Fast vs. Visual Routing):** As a platform owner, I want text and table queries answered in `< 300ms` without loading heavy image tensors, reserving multimodal image inference only for queries that retrieve `figure` chunks.
@@ -63,13 +63,13 @@ Build a self-contained, production-hardened Multimodal RAG platform (`OmniDoc-Vi
 - **Purpose:** Index visual figures into the same unified `Qdrant` (Dense `BGE-M3`) + `BM25` (Sparse) retrieval engine without requiring a separate vision embedding model in VRAM.
 - **Acceptance Criteria:**
   - During ingestion, each cropped figure is processed by a structured technical captioning prompt on `Qwen2.5-VL-7B-Instruct-AWQ` (with a deterministic local OCR/metadata fallback for offline CI tests) that extracts: chart title, axis labels, legend series, key numeric inflection points, and component topology.
-  - All chunks (`chunk_type: "text" | "table" | "figure"`) are indexed in Qdrant + BM25 and reranked via `BAAI/bge-reranker-v2-m3`.
+  - All chunks (`modality: "text" | "table" | "figure"`) are indexed in Qdrant + BM25 and reranked via `BAAI/bge-reranker-v2-m3`.
 
 ### Feature 3: LangGraph Adaptive Multimodal Routing Gateway
 - **Purpose:** Dynamically route queries after CRAG validation between the **Fast Text/Table Path** and the **Visual VLM Reasoning Path**.
 - **Acceptance Criteria:**
   - **Fast Path:** Triggered when top reranked chunks contain only `text` or `table` modalities. Calls `Qwen2.5-VL` with text-only messages (`P95 <= 300ms`).
-  - **Visual Path:** Triggered when $\ge 1$ top reranked chunk has `chunk_type == "figure"` (up to `MAX_IMAGES_PER_QUERY = 2`). Encodes the cropped PNG(s) and invokes multimodal vision-language reasoning (`P95 <= 1200ms`).
+  - **Visual Path:** Triggered when $\ge 1$ top reranked chunk has `modality == "figure"` (up to `MAX_IMAGES_PER_QUERY = 2`). Encodes the cropped PNG(s) and invokes multimodal vision-language reasoning (`P95 <= 1200ms`).
   - Includes CRAG confidence grading (`threshold >= 0.35`) and query rewriting for low-relevance retrievals.
 
 ### Feature 4: Chainlit Visual Attribution Console

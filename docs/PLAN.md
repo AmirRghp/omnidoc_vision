@@ -17,11 +17,11 @@ This plan breaks the implementation of **OmniDoc-Vision** into **8 Phases** and 
 ## Phase 1: Project Scaffolding, Schemas & Synthetic Benchmark PDF Generator
 ### Task 1.1: Repository Skeleton & Dependencies
 - **Reference Docs:** `docs/ARCHITECTURE.md`, `docs/CODE_STYLE.md`
-- **Target Files:** `pyproject.toml`, `requirements.txt`, `.env.example`, `.gitignore`, `Makefile`
+- **Target Files:** `pyproject.toml`, `requirements.txt`, `.env.example`, `.gitignore`, `Makefile`, `README.md`
 - **Implementation Details:**
   - Create directory tree (`src/common`, `src/schemas`, `src/ingestion`, `src/retrieval`, `src/graph`, `src/services`, `src/api`, `scripts`, `evals`, `tests/unit`, `tests/integration`, `data/raw_pdfs`, `data/crops`).
   - Include dependencies: `docling`, `pypdf`, `pdfplumber`, `reportlab`, `matplotlib`, `Pillow`, `fastapi`, `uvicorn`, `pydantic>=2.9`, `pydantic-settings`, `qdrant-client`, `FlagEmbedding` (or `sentence-transformers`), `bm25s`, `langgraph`, `openai`, `httpx`, `redis`, `chainlit`, `pytest`, `pytest-asyncio`, `ruff`, `mypy`.
-- **Verification:** `pip install -r requirements.txt && ruff --version`
+- **Verification:** `pip install -r requirements.txt && ruff --version && python -m pip wheel . --no-deps -w dist`
 
 ### Task 1.2: Core Settings, Logger & Multimodal Pydantic Schemas
 - **Reference Docs:** `docs/DATABASE.md`, `docs/API.md`
@@ -32,14 +32,14 @@ This plan breaks the implementation of **OmniDoc-Vision** into **8 Phases** and 
 
 ### Task 1.3: Automated Technical PDF & Golden Dataset Generator
 - **Reference Docs:** `docs/PRD.md`, `docs/TESTING.md`
-- **Target Files:** `scripts/build_benchmark_pdfs.py`, `data/golden_multimodal_dataset.json`
+- **Target Files:** `scripts/build_benchmark_pdfs.py`, `scripts/benchmark/*.py`, `data/golden_multimodal_dataset.json`, `tests/unit/test_benchmark_generator.py`
 - **Implementation Details:**
   - Write a deterministic Python script using `reportlab` and `matplotlib` that generates 3 realistic multi-page engineering PDFs in `data/raw_pdfs/`:
     1. `cloud_database_benchmark_2026.pdf` (Contains merged-cell throughput/memory tables + P99 latency vs. concurrency line charts).
     2. `distributed_cache_architecture.pdf` (Contains cluster topology diagrams + eviction policy comparison tables).
     3. `gpu_inference_capacity_report.pdf` (Contains AWQ vs FP16 VRAM bar charts + batch size latency matrices).
   - Generate `data/golden_multimodal_dataset.json` with 30 bilingual QA pairs (10 Table, 10 Visual Chart/Diagram, 10 Text) with ground-truth answers, expected page numbers, and expected modalities.
-- **Verification:** `python scripts/build_benchmark_pdfs.py && ls -lh data/raw_pdfs/`
+- **Verification:** `python scripts/build_benchmark_pdfs.py && pytest tests/unit/test_benchmark_generator.py -v && ls -lh data/raw_pdfs/`
 
 ---
 

@@ -582,8 +582,8 @@
         "fa": "برای بودجه ۱۶ گیگابایت VRAM کدام پیکربندی سرویس‌دهی توصیه می‌شود؟"
       },
       "ground_truth": {
-        "en": "AWQ 4-bit with a maximum batch size of 8",
-        "fa": "AWQ 4-bit با حداکثر batch size برابر ۸"
+        "en": "AWQ 4-bit with a recommended batch size of 8",
+        "fa": "AWQ 4-bit با batch size توصیه‌شده ۸"
       }
     },
     {

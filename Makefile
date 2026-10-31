@@ -1,4 +1,4 @@
-.PHONY: install lint format typecheck test test-unit clean benchmark-pdfs run-api run-ui
+.PHONY: install lint format typecheck test test-unit clean benchmark-pdfs build run-api run-ui
 
 PYTHON ?= python
 
@@ -13,7 +13,7 @@ format:
 	ruff format .
 
 typecheck:
-	mypy src
+	mypy --strict src scripts
 
 test:
 	pytest tests/ -v
@@ -24,8 +24,12 @@ test-unit:
 benchmark-pdfs:
 	$(PYTHON) scripts/build_benchmark_pdfs.py
 
+build:
+	$(PYTHON) -m pip wheel . --no-deps -w dist
+
+# These targets become runnable in Phases 5 and 6.
 run-api:
-	uvicorn src.api.routes:app --reload --host 0.0.0.0 --port 8000
+	uvicorn src.api.routes:app --reload --host 0.0.0.0 --port 8001
 
 run-ui:
 	chainlit run app.py -w

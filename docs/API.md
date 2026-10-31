@@ -10,6 +10,7 @@
 ### 2.1 `POST /api/v1/ingest`
 Parses a PDF document using `IBM Docling`, reconstructs tables, crops figures, generates Approach A visual captions, and indexes all chunks into Qdrant and BM25.
 - **Request (`multipart/form-data` or JSON path):**
+  `pdf_path` is relative to the configured PDF directory; absolute paths and `..` traversal are rejected.
   ```json
   {
     "pdf_path": "data/raw_pdfs/cloud_database_benchmark_2026.pdf",
@@ -22,7 +23,7 @@ Parses a PDF document using `IBM Docling`, reconstructs tables, crops figures, g
     "status": "indexed",
     "doc_id": "doc_cloud_db_bench_2026",
     "doc_name": "cloud_database_benchmark_2026.pdf",
-    "pages_processed": 6,
+    "pages_processed": 5,
     "chunks_created": {
       "text": 18,
       "table": 4,
@@ -40,7 +41,7 @@ Executes the end-to-end Hybrid Retrieval + Cross-Encoder Reranking + CRAG Valida
 - **Request Body:**
   ```json
   {
-    "query": "بر اساس نمودار تاخیر P99 در صفحه ۴، در چه تعداد اتصالی خطای سیستم جهش می‌کند؟",
+    "query": "بر اساس نمودار تاخیر P99 در صفحه ۳، در چه تعداد اتصالی خطای سیستم جهش می‌کند؟",
     "top_k": 5,
     "modality_filter": null,
     "force_visual_route": false
@@ -49,7 +50,7 @@ Executes the end-to-end Hybrid Retrieval + Cross-Encoder Reranking + CRAG Valida
 - **Response Body (`200 OK`):**
   ```json
   {
-    "answer": "بر اساس نمودار تاخیر P99 در صفحه ۴ (`cloud_database_benchmark_2026.pdf`)، تا سقف ۲۰۰ اتصال هم‌زمان، تاخیر زیر ۴۵ میلی‌ثانیه پایدار است؛ اما دقیقاً از مرز **۲۵۰ اتصال هم‌زمان (Concurrent Connections)** شیب نمودار برای دیتابیس استاندارد به شدت صعودی شده و به ۶۲۰ میلی‌ثانیه می‌رسد.",
+    "answer": "بر اساس نمودار تاخیر P99 در صفحه ۳ (`cloud_database_benchmark_2026.pdf`)، تا سقف ۲۰۰ اتصال هم‌زمان، تاخیر زیر ۴۵ میلی‌ثانیه پایدار است؛ اما دقیقاً از مرز **۲۵۰ اتصال هم‌زمان (Concurrent Connections)** شیب نمودار برای دیتابیس استاندارد به شدت صعودی شده و به ۶۲۰ میلی‌ثانیه می‌رسد.",
     "routing_path": "VISUAL_VLM_PATH",
     "crag_status": "CONFIDENT",
     "rewritten_query": null,
@@ -62,25 +63,28 @@ Executes the end-to-end Hybrid Retrieval + Cross-Encoder Reranking + CRAG Valida
     },
     "citations": [
       {
-        "chunk_id": "doc_cloud_db_bench_2026_p04_fig01",
+        "chunk_id": "doc_cloud_db_bench_2026_p03_fig01",
         "doc_name": "cloud_database_benchmark_2026.pdf",
-        "page_number": 4,
+        "page_number": 3,
         "modality": "figure",
-        "section_title": "4.2 P99 Latency vs. Concurrency",
+        "section_title": "3.1 What the Curve Shows",
         "rerank_score": 0.942,
         "bounding_box": {
-          "page": 4,
-          "x0": 112.5,
-          "y0": 240.0,
-          "x1": 525.0,
-          "y1": 598.5
+          "page": 3,
+          "x0": 0.19,
+          "y0": 0.285,
+          "x1": 0.882,
+          "y1": 0.71,
+          "coord_origin": "TOPLEFT"
         },
-        "image_url": "/api/v1/crops/doc_cloud_db_bench_2026_p04_fig01.png",
+        "image_url": "/api/v1/crops/doc_cloud_db_bench_2026_p03_fig01.png",
         "content_preview": "[FIGURE] P99 Write Latency (ms) vs Concurrent Connections (50-500)..."
       }
     ]
   }
   ```
+
+`bounding_box` coordinates are normalized to `[0, 1]` with a `TOPLEFT` origin by default. `rerank_score` is normalized to `[0, 1]`; `crag_status` is `CONFIDENT` or `LOW_CONFIDENCE`, and `vlm_images_inspected` is hard-capped at `2`.
 
 ---
 

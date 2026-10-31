@@ -16,7 +16,9 @@ Processing binary PDF files and passing cropped images to Vision-Language Models
 ---
 
 ## 3. Path Traversal Prevention on Crop Assets
+- Request schemas reject absolute `pdf_path` values and any `..` components; `image_path` values must be relative and traversal-free.
 - The `/api/v1/crops/{crop_filename}` endpoint validates `crop_filename` using `Path(crop_filename).name` and verifies that `resolved_path.is_relative_to(CROPS_DIR.resolve())`. Any `".."` or slash characters immediately return `HTTP 400 Bad Request`.
+- Raw table HTML from a PDF is rejected when it contains a `<script` tag; the Chainlit layer must still sanitize any HTML it renders.
 
 ---
 

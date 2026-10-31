@@ -16,7 +16,7 @@ from src.schemas.api import (
 )
 from src.schemas.document import BoundingBox, ChunkModality, CoordOrigin, MultimodalChunk
 
-VALID_BBOX = {"page": 2, "x0": 85.0, "y0": 190.0, "x1": 510.0, "y1": 410.0}
+VALID_BBOX = {"page": 2, "x0": 0.14, "y0": 0.22, "x1": 0.85, "y1": 0.49}
 
 TEXT_CHUNK = {
     "chunk_id": "doc_demo_p02_txt01",
@@ -59,20 +59,20 @@ QUERY_RESPONSE = {
     },
     "citations": [
         {
-            "chunk_id": "doc_cloud_db_bench_2026_p04_fig01",
+            "chunk_id": "doc_cloud_db_bench_2026_p03_fig01",
             "doc_name": "cloud_database_benchmark_2026.pdf",
-            "page_number": 4,
+            "page_number": 3,
             "modality": "figure",
-            "section_title": "4.2 P99 Latency vs. Concurrency",
+            "section_title": "3.1 What the Curve Shows",
             "rerank_score": 0.942,
             "bounding_box": {
-                "page": 4,
-                "x0": 112.5,
-                "y0": 240.0,
-                "x1": 525.0,
-                "y1": 598.5,
+                "page": 3,
+                "x0": 0.19,
+                "y0": 0.285,
+                "x1": 0.882,
+                "y1": 0.71,
             },
-            "image_url": "/api/v1/crops/doc_cloud_db_bench_2026_p04_fig01.png",
+            "image_url": "/api/v1/crops/doc_cloud_db_bench_2026_p03_fig01.png",
             "content_preview": "[FIGURE] P99 Write Latency (ms) vs Concurrent Connections.",
         }
     ],
@@ -82,29 +82,34 @@ QUERY_RESPONSE = {
 def test_chunk_modality_values_are_lowercase() -> None:
     assert {modality.value for modality in ChunkModality} == {"text", "table", "figure"}
     assert ChunkModality.FIGURE == "figure"
+    assert "modality" in MultimodalChunk.model_fields
+    assert "chunk_type" not in MultimodalChunk.model_fields
 
 
 def test_bounding_box_accepts_valid_geometry() -> None:
     bbox = BoundingBox(**VALID_BBOX)
 
     assert bbox.page == 2
-    assert bbox.x0 == 85.0
-    assert bbox.x1 == 510.0
+    assert bbox.x0 == 0.14
+    assert bbox.x1 == 0.85
     assert bbox.coord_origin is CoordOrigin.TOPLEFT
 
 
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"x1": 85.0},
-        {"y1": 190.0},
-        {"x1": 10.0},
-        {"y1": 10.0},
-        {"x0": -1.0},
+        {"x1": 0.14},
+        {"y1": 0.22},
+        {"x1": 0.05},
+        {"y1": 0.10},
+        {"x0": -0.01},
+        {"x1": 1.01},
+        {"y1": -0.01},
+        {"x0": float("inf")},
         {"page": 0},
     ],
 )
-def test_bounding_box_rejects_invalid_geometry(overrides: dict[str, float]) -> None:
+def test_bounding_box_rejects_invalid_geometry(overrides: dict[str, float | int]) -> None:
     with pytest.raises(ValidationError):
         BoundingBox(**{**VALID_BBOX, **overrides})
 
@@ -137,6 +142,9 @@ def test_table_chunk_requires_html() -> None:
     chunk = MultimodalChunk(**TABLE_CHUNK)
     assert chunk.table_html is not None
 
+    with pytest.raises(ValidationError):
+        MultimodalChunk(**{**TABLE_CHUNK, "table_html": "<script>alert(1)</script>"})
+
     without_html = {key: value for key, value in TABLE_CHUNK.items() if key != "table_html"}
     with pytest.raises(ValidationError):
         MultimodalChunk(**without_html)
@@ -153,6 +161,10 @@ def test_table_chunk_accepts_optional_crop() -> None:
 def test_figure_chunk_requires_image_path() -> None:
     chunk = MultimodalChunk(**FIGURE_CHUNK)
     assert chunk.image_path is not None
+
+    for unsafe_path in ("../escape.png", "/absolute/crop.png"):
+        with pytest.raises(ValidationError):
+            MultimodalChunk(**{**FIGURE_CHUNK, "image_path": unsafe_path})
 
     without_image = {key: value for key, value in FIGURE_CHUNK.items() if key != "image_path"}
     with pytest.raises(ValidationError):
@@ -217,8 +229,9 @@ def test_ingest_request_defaults_and_validation() -> None:
     assert request.pdf_path == "data/raw_pdfs/demo.pdf"
     assert request.generate_vlm_captions is True
 
-    with pytest.raises(ValidationError):
-        IngestRequest(pdf_path="   ")
+    for unsafe_path in ("../secret.pdf", "/etc/passwd", "   "):
+        with pytest.raises(ValidationError):
+            IngestRequest(pdf_path=unsafe_path)
 
 
 def test_chunk_counts_require_consistent_total() -> None:
@@ -235,7 +248,7 @@ def test_ingest_response_contract() -> None:
     response = IngestResponse(
         doc_id="doc_demo",
         doc_name="demo.pdf",
-        pages_processed=6,
+        pages_processed=5,
         chunks_created=ChunkCounts(text=18, table=4, figure=3, total=25),
         elapsed_ms=3420.5,
     )
@@ -293,17 +306,20 @@ def test_query_response_parses_documented_example() -> None:
     assert payload["latency_ms"]["total_ms"] == 931.7
 
     citation = payload["citations"][0]
-    assert citation["page_number"] == 4
+    assert citation["page_number"] == 3
     assert citation["modality"] == "figure"
     assert citation["bounding_box"] == {
-        "page": 4,
-        "x0": 112.5,
-        "y0": 240.0,
-        "x1": 525.0,
-        "y1": 598.5,
+        "page": 3,
+        "x0": 0.19,
+        "y0": 0.285,
+        "x1": 0.882,
+        "y1": 0.71,
         "coord_origin": "TOPLEFT",
     }
-    assert citation["image_url"] == "/api/v1/crops/doc_cloud_db_bench_2026_p04_fig01.png"
+    assert citation["image_url"] == "/api/v1/crops/doc_cloud_db_bench_2026_p03_fig01.png"
+
+    with pytest.raises(ValidationError):
+        VisualCitation.model_validate({**citation, "image_url": "https://example.com/crop.png"})
 
 
 def test_query_response_defaults_and_negative_latency() -> None:
@@ -325,6 +341,16 @@ def test_query_response_defaults_and_negative_latency() -> None:
 
     with pytest.raises(ValidationError):
         LatencyBreakdown(retrieval_ms=-1.0, rerank_ms=0.0, generation_ms=0.0, total_ms=0.0)
+    with pytest.raises(ValidationError):
+        MultimodalQueryResponse(
+            answer="Too many images",
+            routing_path=RoutingPath.VISUAL_VLM_PATH,
+            crag_status=CRAGStatus.CONFIDENT,
+            vlm_images_inspected=3,
+            latency_ms=LatencyBreakdown(
+                retrieval_ms=1.0, rerank_ms=1.0, generation_ms=1.0, total_ms=3.0
+            ),
+        )
 
 
 def test_api_enums_use_documented_wire_values() -> None:

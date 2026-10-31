@@ -13,9 +13,9 @@ This document traces the core user and system execution flows in **OmniDoc-Visio
        │
        ▼
 [Step 1: IBM Docling Layout & Structure Engine (`src/ingestion/docling_parser.py`)]
-       ├── Detects Reading-Order Text Blocks -> Emits `DocChunk(chunk_type="text", bbox=[...])`
+       ├── Detects Reading-Order Text Blocks -> Emits `MultimodalChunk(modality="text", bbox=[...])`
        ├── Detects Complex Tables (`TableFormer`) -> Reconstructs lossless Markdown + HTML table
-       │     └── Emits `DocChunk(chunk_type="table", bbox=[...], table_html="...", content="|...|")`
+       │     └── Emits `MultimodalChunk(modality="table", bbox=[...], table_html="...", content="|...|")`
        └── Detects Figures & Diagrams -> Crops high-res PNG (`data/crops/dist_p3_fig1.png`)
              │
              ▼
@@ -62,15 +62,15 @@ This document traces the core user and system execution flows in **OmniDoc-Visio
 *The user asks a question about a visual trend or network diagram that requires looking at the image.*
 
 ```
-[User Query]: "بر اساس نمودار تاخیر P99 در صفحه ۴، از چه تعداد درخواست هم‌زمان (Concurrency) شیب خطای سیستم تند می‌شود؟"
+[User Query]: "بر اساس نمودار تاخیر P99 در صفحه ۳، از چه تعداد درخواست هم‌زمان (Concurrency) شیب خطای سیستم تند می‌شود؟"
        │
        ▼
 [Hybrid Retrieval + Cross-Encoder Reranker]
-       └── Retrieves `chunk_id="dist_p4_fig1"` (`chunk_type="figure"`, `image_path="data/crops/dist_p4_fig1.png"`, score=`0.91`).
+       └── Retrieves `chunk_id="cloud_p03_fig01"` (`modality="figure"`, `image_path="data/crops/cloud_p03_fig01.png"`, score=`0.91`).
        │
        ▼
-[Adaptive Routing Gateway detects `chunk_type == "figure"` -> Selects: 👁️ VISUAL_VLM_PATH]
-       ├── Reads `data/crops/dist_p4_fig1.png`, validates dimensions, encodes as Base64 data URI.
+[Adaptive Routing Gateway detects `modality == "figure"` -> Selects: 👁️ VISUAL_VLM_PATH]
+       ├── Reads `data/crops/cloud_p03_fig01.png`, validates dimensions, encodes as Base64 data URI.
        └── Constructs OpenAI-compatible Multimodal Chat Payload (`image_url` + grounded text context).
        │
        ▼

@@ -3,7 +3,9 @@
 ## 1. Three-Tier Verification Pyramid
 
 ### Tier 1: Fast Deterministic Unit Tests (`tests/unit/` — No GPU / No VLM Required)
-- **`test_docling_parser.py`:** Tests table structure conversion (Markdown/HTML), bounding box normalization (`x0 < x1`, `y0 < y1`), and figure crop saving.
+- **`test_docling_parser.py`:** Tests table structure conversion (Markdown/HTML), normalized bounding boxes (`0 <= x0 < x1 <= 1`, `0 <= y0 < y1 <= 1`), and figure crop saving.
+- **`test_benchmark_generator.py`:** Verifies five-page PDF generation, deterministic bytes, dataset distribution, page/modality correspondence, and the GPU recommendation wording.
+- **`test_packaging.py`:** Guards the README/hatch build metadata and dependency-manifest alignment.
 - **`test_adaptive_router.py`:** Verifies that queries retrieving only `text`/`table` chunks deterministically route to `FAST_TEXT_TABLE_PATH`, whereas queries retrieving $\ge 1$ `figure` chunk route to `VISUAL_VLM_PATH` (capped at 2 images).
 - **`test_noise_transforms.py`:** Verifies synthetic scan degradation functions (rotation $\pm 5^\circ$, Gaussian blur, watermark overlay, low-DPI downsampling).
 
@@ -17,7 +19,7 @@
 
 ## 2. Quantitative Portfolio Benchmarks (`evals/run_multimodal_benchmark.py`)
 
-To provide undeniable empirical proof in `README.md`, the benchmark suite evaluates **3 Pipeline Variants** across **30 Golden Technical QA Pairs** (10 Complex Table Questions, 10 Visual Chart/Diagram Questions, 10 Multi-Column Text Questions):
+To provide undeniable empirical proof in `README.md`, the benchmark suite evaluates **3 Pipeline Variants** across **30 Golden Technical QA Pairs** (10 Complex Table Questions, 10 Visual Chart/Diagram Questions, 10 Text Extraction Questions):
 
 | Evaluation Metric | 1. Naive PyPDF Baseline (Text Only) | 2. Docling Structured RAG (Text + Reconstructed Tables) | 3. OmniDoc-Vision (Docling + Adaptive Qwen2.5-VL) | Production CI Gate |
 | :--- | :--- | :--- | :--- | :--- |

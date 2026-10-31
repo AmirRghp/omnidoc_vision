@@ -17,7 +17,7 @@
 - **On-Disk Payload:** `True`
 
 ### 2.2 Multimodal Payload Schema (JSON)
-Every point stored in Qdrant adheres to the `MultimodalChunkPayload` contract:
+Every point stored in Qdrant adheres to the `MultimodalChunk` contract. Bounding boxes are normalized page-relative rectangles in `[0, 1]`; the default origin is `TOPLEFT`.
 
 ```json
 {
@@ -32,10 +32,10 @@ Every point stored in Qdrant adheres to the `MultimodalChunkPayload` contract:
   "image_path": "data/crops/doc_aurora_bench_p04_fig01.png",
   "bounding_box": {
     "page": 4,
-    "x0": 112.5,
-    "y0": 240.0,
-    "x1": 525.0,
-    "y1": 598.5,
+    "x0": 0.19,
+    "y0": 0.285,
+    "x1": 0.882,
+    "y1": 0.71,
     "coord_origin": "TOPLEFT"
   },
   "ingestion_timestamp": "2026-10-30T18:00:00Z"
