@@ -1,127 +1,135 @@
-# Task 3.1 — Parallel Dense + Sparse Search, RRF Fusion & BGE Reranker
+# Task 4.2 — LangGraph State Machine (`CRAG Evaluator` + `Adaptive Router`)
 
-پیاده‌سازی لایه بازیابی ترکیبی چندوجهی (`src/retrieval/`) شامل جستجوی موازی برداری در Qdrant (`BAAI/bge-m3` Top-20) و جستجوی واژگانی در `BM25s` (Top-20) با `asyncio.gather`، ترکیب نتایج با الگوریتم Reciprocal Rank Fusion ($k=60$)، و بازرتبه‌بندی ۱۵ کاندیدای برتر به Top-5 توسط مدل Cross-Encoder (`BAAI/bge-reranker-v2-m3` به‌همراه Fallback قطعی برای محیط‌های تست/CI).
+پیاده‌سازی ماشین وضعیت چندوجهی مبتنی بر `LangGraph` در `src/graph/` شامل گره‌های بازیابی ترکیبی (`retrieve_node`)، ارزیابی خوداصلاحگر (`crag_evaluate_node`)، بازنویسی پرسش‌های مبهم (`rewrite_query_node`)، مسیریاب تطبیقی (`adaptive_router_edge`) و دو مسیر تولید پاسخ (`fast_text_table_generation_node` برای متن/جدول و `visual_vlm_generation_node` برای تحلیل بصری نمودارها و دیاگرام‌ها با سقف ۲ تصویر).
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> بر اساس مشخصات `docs/PLAN.md`، `docs/ARCHITECTURE.md`، `docs/DATABASE.md` و `docs/UX_FLOWS.md`، نیازمندی‌های تسک ۳.۱ کاملاً شفاف هستند:
+> بر اساس مشخصات `docs/PLAN.md`، `docs/ARCHITECTURE.md`، `docs/UX_FLOWS.md` (Flows 2, 3, 4)، `docs/API.md` و `docs/TESTING.md`، نیازمندی‌های تسک ۴.۲ کاملاً شفاف و بدون ابهام هستند:
 
-- **سطح پیچیدگی تسک:** **Medium** — شامل ۴ ماژول متمرکز در `src/retrieval/` (`dense.py`، `sparse.py`، `fusion.py`، `reranker.py`) و تست‌های واحد کامل در `tests/unit/test_retrieval.py`.
-- **اجرای موازی غیرمسدودکننده (`asyncio.gather` + `asyncio.to_thread`):** اجرای هم‌زمان جستجوی Dense و Sparse با `asyncio.gather` و انتقال عملیات محاسباتی CPU/GPU (توکنایزینگ `BM25s` و استنتاج `CrossEncoder`) به `asyncio.to_thread`.
-- **نرمال‌سازی امتیاز بازرتبه‌بندی (`rerank_score` در بازه `[0.0, 1.0]`):** امتیازهای خروجی مدل `BAAI/bge-reranker-v2-m3` (و `MockReranker` در حالت تست/CI) در بازه `[0.0, 1.0]` نرمال‌سازی می‌شوند تا با قرارداد `VisualCitation.rerank_score` در `src/schemas/api.py` و آستانه `0.35` در گره `CRAG Evaluator` (تسک ۴.۲) کاملاً سازگار باشند.
+- **سطح پیچیدگی تسک:** **Medium** — تمرکز صرفاً روی ماژول‌های گراف وضعیت در `src/graph/` و مجموعه تست‌های واحد مربوطه. (نکته: فایل‌های سرور `main.py` و `app.py` طبق `docs/PLAN.md` در فازهای ۵ و ۶ پیاده‌سازی می‌شوند و در Plan Mode هیچ فایلی تغییر نمی‌کند.)
+- **منطق تصمیم‌گیری CRAG (`CRAG_CONFIDENCE_THRESHOLD = 0.35`):** در گره `crag_evaluate_node`، اگر بیشینه امتیاز بازرتبه‌بندی (`max(rerank_score)`) کمتر از `0.35` باشد و `rewrite_count < 1` باشد، گراف به `rewrite_query_node` و سپس مجدداً به `retrieve_node` هدایت می‌شود (حداکثر ۱ بار بازنویسی برای جلوگیری از حلقه بی‌نهایت). در پایان ارزیابی، وضعیت `crag_status` روی `CONFIDENT` (در صورت `max_score >= 0.35`) یا `LOW_CONFIDENCE` تنظیم می‌گردد.
+- **مسیریابی تطبیقی (`adaptive_router_edge`):** پس از تأیید یا تکمیل چرخه CRAG، اگر `force_visual_route=True` باشد یا حداقل یک چانک در Top-K بازیابی‌شده دارای `modality == ChunkModality.FIGURE` باشد، مسیر `VISUAL_VLM_PATH` (`visual_vlm_generation_node`) انتخاب می‌شود؛ در غیر این صورت به مسیر سریع `FAST_TEXT_TABLE_PATH` (`fast_text_table_generation_node`) هدایت می‌شود.
+- **حفظ Attribution و سقف تصاویر (`max_images_per_query = 2`):** در مسیر بصری حداکثر ۲ تصویر (`vlm_images_inspected <= 2`) به `VLMService.generate_visual_reasoning` ارسال می‌شود و خروجی گراف مستقیماً قابلیت تبدیل به مدل استاندارد `MultimodalQueryResponse` (شامل `VisualCitation` با `image_url="/api/v1/crops/{filename}"`، `bounding_box` و `LatencyBreakdown`) را دارد تا در تسک ۵.۱ (`/api/v1/query`) و تسک ۶.۱ (`Chainlit UI`) بدون لایه تبدیل اضافی استفاده شود.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does:** پرسش کاربر (فارسی یا انگلیسی) و فیلتر اختیاری مدالیته (`modality_filter: ChunkModality | str | None`) را دریافت کرده، Top-20 چانک از Qdrant و Top-20 چانک از ایندکس `BM25s` را به‌طور موازی بازیابی می‌کند، با فرمول $\text{RRF}(d) = \sum \frac{1}{k + \text{rank}(d)}$ ($k=60$) ادغام می‌نماید، ۱۵ کاندیدای اول را با `BGE-Reranker-v2-m3` بازرتبه‌بندی کرده و Top-K (پیش‌فرض ۵) چانک برتر را به‌همراه امتیاز و زمان‌بندی (`retrieval_ms`, `rerank_ms`) برمی‌گرداند.
-- **Target Audience / Downstream Consumers:** ماشین وضعیت LangGraph (`retrieve_node` و `crag_evaluate_node` در تسک ۴.۲)، اندپوینت `/api/v1/query` (تسک ۵.۱)، و بنچمارک سهلایه (تسک ۷.۱).
-- **Key Value:** ترکیب دقت معنایی `BGE-M3` با تطابق دقیق واژگان/اعداد فنی در `BM25s` بدون از دست رفتن متادیتای بصری (`bounding_box`, `image_path`, `table_html`).
+- **What It Does:** پرسش کاربر و پارامترهای جستجو (`top_k`, `modality_filter`, `force_visual_route`) را در قالب وضعیت تایپ‌شده `VisionGraphState` دریافت کرده، بازیابی ترکیبی (`HybridRetriever`) را اجرا می‌کند، کیفیت شواهد را با آستانه `0.35` می‌سنجد (در صورت نیاز پرسش را بازنویسی و بازیابی را تکرار می‌کند)، و بر اساس مدالیته چانک‌های بازیابی‌شده بین مسیر سریع متنی/جدولی (`< 300ms`) و مسیر استدلال بصری VLM (`~800-1200ms`) تصمیم‌گیری می‌نماید.
+- **Target Audience / Downstream Consumers:** اندپوینت `/api/v1/query` در FastAPI (تسک ۵.۱)، رابط کاربری Chainlit (تسک ۶.۱)، و بنچمارک سه‌گانه ارزیابی (تسک ۷.۱).
+- **Key Value:** حذف سربار رمزنگاری Base64 و مصرف حافظه KV-cache روی GPU 16GB برای پرسش‌های صرفاً متنی و جدولی، درحالی‌که برای پرسش‌های نیازمند تحلیل پیکسل‌های نمودار و دیاگرام، تصاویر برش‌خورده با دقت بالا به `Qwen2.5-VL` ارسال می‌شوند.
 
 ---
 
-## 2. User Experience & Visual Design (Retrieval & Attribution Flow)
+## 2. User Experience & Visual Design (Execution & Attribution Flows)
 
-- **Key Execution Flow:**
-  1. دریافت پرسش `query`، تعداد نتایج نهایی `top_k=5`، و فیلتر اختیاری `modality_filter` (`"text" | "table" | "figure"`).
-  2. اجرای موازی `DenseRetriever.search(query, top_k=20, modality_filter=...)` و `SparseRetriever.search(query, top_k=20, modality_filter=...)` از طریق `asyncio.gather`.
-  3. ادغام لیست‌های رتبه‌بندی‌شده توسط `reciprocal_rank_fusion(dense_hits, sparse_hits, k=60, top_n=15)` با حفظ کامل شیء `MultimodalChunk`.
-  4. بازرتبه‌بندی ۱۵ کاندیدای برتر توسط `BGEReranker.rerank(query, candidates, top_k=5)` و بازگرداندن لیست نهایی `ScoredChunk` به‌ترتیب نزولی `rerank_score`.
+- **Flow A — مسیر سریع متنی و جدولی (`FAST_TEXT_TABLE_PATH`):**
+  1. بازیابی Top-5 چانک که همگی از نوع `text` یا `table` هستند با بیشینه امتیاز `>= 0.35`.
+  2. انتخاب مسیر `FAST_TEXT_TABLE_PATH` بدون بارگذاری تصویر (`vlm_images_inspected = 0`).
+  3. تولید پاسخ مستند به جدول Markdown/HTML و متن، همراه با `citations` و زمان‌بندی دقیق (`retrieval_ms`, `rerank_ms`, `generation_ms`, `total_ms`).
+- **Flow B — مسیر استدلال بصری (`VISUAL_VLM_PATH`):**
+  1. حضور حداقل یک چانک با `modality == "figure"` در Top-5 (یا فعال بودن `force_visual_route=True`).
+  2. انتخاب مسیر `VISUAL_VLM_PATH`، استخراج حداکثر ۲ مسیر تصویر یکتا از چانک‌های `figure` (یا دارای `image_path`) و فراخوانی `VLMService.generate_visual_reasoning`.
+  3. ثبت تعداد تصاویر بررسی‌شده در `vlm_images_inspected` (در بازه `0..2`) و ساخت `VisualCitation` با `image_url="/api/v1/crops/{crop_name}"`.
+- **Flow C — خوداصلاحگری CRAG (`rewrite_query_node`):**
+  1. اگر بیشینه امتیاز بازرتبه‌بندی اولیه `< 0.35` باشد و `rewrite_count == 0`، گره `rewrite_query_node` پرسش مبهم را از طریق `VLMService.rewrite_query` به پرسش غنی از کلیدواژه‌های فنی تبدیل کرده و `rewrite_count` را به `1` افزایش می‌دهد.
+  2. اجرای مجدد `retrieve_node` با پرسش بازنویسی‌شده (تجمیع زمان `retrieval_ms` و `rerank_ms`) و سپس عبور از `adaptive_router_edge`.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: مدل داده یکپارچه برای کاندیداهای بازیابی (`ScoredChunk`)**
-  - *Chosen Approach:* تعریف مدل تغییرناپذیر `ScoredChunk(BaseModel)` شامل `chunk: MultimodalChunk`، `score: float` (امتیاز فعال در هر مرحله)، `dense_score: float | None`، `sparse_score: float | None`، `rrf_score: float | None` و `rerank_score: float | None`.
-  - *Why:* حفظ کامل شیء استاندارد `MultimodalChunk` و قابلیت ردیابی امتیاز هر مرحله برای CRAG، لاگینگ و `VisualCitation`.
-- **Decision 2: استفاده مجدد از `BaseEmbedder` و `tokenize_bilingual` از لایه `src/ingestion/indexer.py`**
-  - *Chosen Approach:* `DenseRetriever` از همان رابط `BaseEmbedder` (`BGEM3Embedder` / `MockEmbedder`) و `SparseRetriever` از همان تابع `tokenize_bilingual` و فایل `corpus_metadata.json` ایجادشده در `HybridIndexer` استفاده می‌کنند.
-  - *Why:* جلوگیری از تکرار کد و تضمین سازگاری ۱۰۰٪ بین توکنایزینگ/امبدینگ زمان ایندکس و زمان پرسش.
-- **Decision 3: معماری `BaseReranker` با `BGEReranker` و `MockReranker` قطعی**
-  - *Chosen Approach:* در محیط تولید از `FlagEmbedding.FlagReranker("BAAI/bge-reranker-v2-m3", use_fp16=...)` (با نگاشت سیگموئید به `[0.0, 1.0]`) استفاده می‌شود و در محیط تست/CI یا عدم نصب `FlagEmbedding`، به‌طور خودکار به `MockReranker` مبتنی بر هم‌پوشانی توکن‌های دوزبانه (`normalize_bilingual_text`) و امتیاز RRF سوییچ می‌گردد.
-  - *Why:* اجرای سریع و کاملاً قطعی تمام تست‌های واحد و یکپارچه‌سازی روی CPU بدون وابستگی به وزن‌های سنگین GPU (`AGENTS.md` Rule #2).
+- **Decision 1: ساختار `VisionGraphState` مبتنی بر `TypedDict` استاندارد LangGraph**
+  - *Chosen Approach:* تعریف `VisionGraphState(TypedDict, total=False)` شامل فیلدهای ورودی (`query`, `top_k`, `modality_filter`, `force_visual_route`)، فیلدهای کنترلی CRAG (`active_query`, `rewritten_query`, `rewrite_count`, `max_rerank_score`, `crag_status`)، فیلدهای بازیابی (`retrieved_chunks`) و فیلدهای خروجی (`routing_path`, `answer`, `vlm_images_inspected`, `citations`, `retrieval_ms`, `rerank_ms`, `generation_ms`, `total_ms`).
+  - *Why:* سازگاری کامل با `StateGraph(VisionGraphState)` در `langgraph>=0.2.0` و تایپینگ سخت‌گیرانه `mypy --strict`.
+- **Decision 2: تزریق وابستگی (`Dependency Injection`) در سازنده گره‌ها و گراف**
+  - *Chosen Approach:* پیاده‌سازی کلاس/ساختار `AdaptiveRAGWorkflow` و توابع گره‌ها به‌گونه‌ای که نمونه‌های `HybridRetriever` و `VLMService` (یا پروتکل‌های معادل در تست واحد) قابل تزریق باشند.
+  - *Why:* امکان تست واحد ۱۰۰٪ ایزوله، سریع و قطعی بدون نیاز به سرورهای خارجی و همچنین استفاده آسان در FastAPI و Chainlit.
+- **Decision 3: ساخت خودکار `VisualCitation` با نگاشت امن `image_path` به `/api/v1/crops/{filename}`**
+  - *Chosen Approach:* تبدیل هر `ScoredChunk` به `VisualCitation` با استخراج نام فایل از `chunk.image_path` (`f"/api/v1/crops/{Path(chunk.image_path).name}"`) و پیش‌نمایش متنی خلاصه‌شده (`content_preview`).
+  - *Why:* انطباق کامل با اعتبارسنج‌های `VisualCitation` در قراردادهای API و حفظ زنجیره Attribution در تمام لایه‌ها (`AGENTS.md` Rule #4).
 
 ---
 
 ## 4. Technical Architecture & Data Strategy
 
-### Architecture & Component Diagram
+### Architecture & State Machine Diagram
 
 ```
-                         ┌──────────────────────────────┐
-                         │  User Query + ModalityFilter │
-                         └──────────────┬───────────────┘
-                                        │
-                       ┌────────────────┴────────────────┐
-                       │         asyncio.gather          │
-                       ▼                                 ▼
-        ┌─────────────────────────────┐   ┌─────────────────────────────┐
-        │   DenseRetriever (dense.py) │   │  SparseRetriever (sparse.py)│
-        │ - Embed query via BGE-M3    │   │ - tokenize_bilingual(query) │
-        │ - Qdrant query_points Top20 │   │ - BM25s retrieve Top20      │
-        │ - Payload modality filter   │   │ - Metadata modality filter  │
-        └──────────────┬──────────────┘   └──────────────┬──────────────┘
-                       └────────────────┬────────────────┘
-                                        ▼
-                       ┌─────────────────────────────────┐
-                       │    RRF Fusion (fusion.py)       │
-                       │ - k = 60                        │
-                       │ - Deduplicate by chunk_id       │
-                       │ - Select Top-15 candidates      │
-                       └────────────────┬────────────────┘
-                                        ▼
-                       ┌─────────────────────────────────┐
-                       │   BGEReranker (reranker.py)     │
-                       │ - BAAI/bge-reranker-v2-m3       │
-                       │   (or deterministic MockRerank) │
-                       │ - Sigmoid score in [0.0, 1.0]   │
-                       │ - Return Top-5 ScoredChunk      │
-                       └─────────────────────────────────┘
+                     ┌────────────────────────────────────┐
+                     │        START (User Request)        │
+                     │ query, top_k, modality_filter, ... │
+                     └─────────────────┬──────────────────┘
+                                       │
+                                       ▼
+                     ┌────────────────────────────────────┐
+                     │           retrieve_node            │
+                     │ HybridRetriever.retrieve(active_q) │
+                     └─────────────────┬──────────────────┘
+                                       │
+                                       ▼
+                     ┌────────────────────────────────────┐
+                     │         crag_evaluate_node         │
+                     │ Computes max_rerank_score & status │
+                     └─────────────────┬──────────────────┘
+                                       │
+                   ┌───────────────────┴───────────────────┐
+                   │ (max_score < 0.35 & rewrite_count < 1)│ (max_score >= 0.35 OR rewrite_count >= 1)
+                   ▼                                       ▼
+     ┌───────────────────────────┐           ┌───────────────────────────┐
+     │    rewrite_query_node     │           │   adaptive_router_edge    │
+     │ VLMService.rewrite_query  │           └──────┬─────────────┬──────┘
+     │ rewrite_count += 1        │                  │             │
+     └─────────────┬─────────────┘    (No figure &  │             │ (Has figure chunk OR
+                   │                   not forced)  │             │  force_visual_route=True)
+                   └──────────────► (retrieve_node) │             │
+                                                    ▼             ▼
+                                     ┌───────────────────┐ ┌──────────────────────┐
+                                     │ fast_text_table_  │ │ visual_vlm_          │
+                                     │ generation_node   │ │ generation_node      │
+                                     │ (FAST_TEXT_TABLE) │ │ (VISUAL_VLM_PATH,    │
+                                     │ 0 images inspected│ │  <= 2 Base64 crops)  │
+                                     └─────────┬─────────┘ └──────────┬───────────┘
+                                               └──────────┬───────────┘
+                                                          ▼
+                                     ┌────────────────────────────────────┐
+                                     │   END (MultimodalQueryResponse)    │
+                                     └────────────────────────────────────┘
 ```
 
-### Target Files & Signatures
+### Component & State Responsibilities
 
-1. **`src/retrieval/dense.py`:**
-   - `ScoredChunk(BaseModel)`: نگه‌دارنده `chunk: MultimodalChunk` و امتیازهای مراحل بازیابی.
-   - `DenseRetriever`:
-     - `__init__(self, settings: Settings | None = None, qdrant_client: AsyncQdrantClient | None = None, embedder: BaseEmbedder | None = None) -> None`
-     - `async def search(self, query: str, *, top_k: int = 20, modality_filter: ChunkModality | str | None = None, doc_name: str | None = None) -> list[ScoredChunk]`
-2. **`src/retrieval/sparse.py`:**
-   - `SparseRetriever`:
-     - `__init__(self, settings: Settings | None = None, *, bm25_dir: Path | None = None) -> None`
-     - `async def search(self, query: str, *, top_k: int = 20, modality_filter: ChunkModality | str | None = None, doc_name: str | None = None) -> list[ScoredChunk]`
-3. **`src/retrieval/fusion.py`:**
-   - `RRF_K_DEFAULT: Final[int] = 60`
-   - `def reciprocal_rank_fusion(ranked_lists: Sequence[Sequence[ScoredChunk]], *, k: int = 60, top_n: int = 15) -> list[ScoredChunk]`
-4. **`src/retrieval/reranker.py`:**
-   - `BaseReranker(ABC)`، `MockReranker(BaseReranker)`، `BGEReranker(BaseReranker)`
-   - `HybridRetrievalResult(BaseModel)`: شامل `chunks: list[ScoredChunk]`، `retrieval_ms: float`، `rerank_ms: float`.
-   - `HybridRetriever`: ارکستریتور سطح بالا که `DenseRetriever` و `SparseRetriever` را با `asyncio.gather(return_exceptions=False)` اجرا کرده، با `reciprocal_rank_fusion` ترکیب نموده و با `reranker.rerank` به Top-5 تبدیل می‌کند.
-5. **`src/retrieval/__init__.py`:**
-   - صادر کردن کلاس‌ها و توابع عمومی لایه بازیابی در `__all__`.
-6. **`tests/unit/test_retrieval.py`:**
-   - تست `DenseRetriever` روی Qdrant درون‌حافظه‌ای (`:memory:`) با و بدون `modality_filter` (`text`, `table`, `figure`).
-   - تست `SparseRetriever` روی ایندکس `BM25s` محلی با پرسش‌های فارسی و انگلیسی و فیلتر مدالیته.
-   - تست ریاضی دقیق `reciprocal_rank_fusion` با $k=60$، حذف تکراری‌ها (`chunk_id`)، و محدودسازی به Top-15.
-   - تست `MockReranker` و `BGEReranker` (همراه با تست Fallback زمان اجرا و نرمال‌سازی سیگموئید در `[0.0, 1.0]`).
-   - تست End-to-End کلاس `HybridRetriever` (اجرای موازی Dense + Sparse -> RRF -> Rerank به Top-5 و حفظ کامل `bounding_box`، `image_path` و `table_html`).
+1. **State Definition:**
+   - تعریف ثابت `CRAG_CONFIDENCE_THRESHOLD: Final[float] = 0.35` و `MAX_REWRITE_COUNT: Final[int] = 1`.
+   - تعریف `VisionGraphState(TypedDict, total=False)` و تابع کمکی تبدیل وضعیت نهایی به `MultimodalQueryResponse` و `VisualCitation`.
+2. **Graph Nodes & Edges:**
+   - `retrieve_node`: فراخوانی `retriever.retrieve` روی `active_query` (یا `query`) با `top_k` و `modality_filter`، ذخیره `retrieved_chunks` و انباشت زمان‌های `retrieval_ms` و `rerank_ms`.
+   - `crag_evaluate_node`: محاسبه بیشینه امتیاز بازرتبه‌بندی از `retrieved_chunks` و تعیین `crag_status` (`CONFIDENT` اگر `>= 0.35` وگرنه `LOW_CONFIDENCE`).
+   - `crag_gate_edge`: یال شرطی پس از `crag_evaluate_node` که در صورت `max_rerank_score < 0.35` و `rewrite_count < 1` به `"rewrite_query"` و در غیر این صورت به مسیر مسیریاب تطبیقی هدایت می‌کند.
+   - `rewrite_query_node`: فراخوانی `vlm_service.rewrite_query(query)`، به‌روزرسانی `rewritten_query`، `active_query` و افزایش `rewrite_count`.
+   - `adaptive_router_edge`: بررسی `force_visual_route` و مدالیته چانک‌های داخل `retrieved_chunks`؛ بازگرداندن `RoutingPath.VISUAL_VLM_PATH` در صورت وجود حداقل یک چانک `figure` یا `force_visual_route=True`، و در غیر این صورت `RoutingPath.FAST_TEXT_TABLE_PATH`.
+   - `fast_text_table_generation_node`: فراخوانی `vlm_service.generate_fast_text`، تنظیم `routing_path = RoutingPath.FAST_TEXT_TABLE_PATH`، `vlm_images_inspected = 0`، محاسبه `generation_ms` و `total_ms` و ساخت لیست `citations`.
+   - `visual_vlm_generation_node`: استخراج حداکثر ۲ مسیر تصویر یکتا از چانک‌های `figure` (یا دارای `image_path` در حالت `force_visual_route`)، فراخوانی `vlm_service.generate_visual_reasoning`، تنظیم `routing_path = RoutingPath.VISUAL_VLM_PATH`، ثبت `vlm_images_inspected` (حداکثر ۲)، محاسبه `generation_ms` و `total_ms` و ساخت لیست `citations`.
+3. **Workflow Builder & Runner:**
+   - ساخت و کامپایل `StateGraph(VisionGraphState)` با گره‌ها و یال‌های شرطی.
+   - ارائه کلاس `AdaptiveRAGWorkflow` (و تابع سازنده `build_vision_graph`) با متد `async def ainvoke_query(request: MultimodalQueryRequest) -> MultimodalQueryResponse` برای اجرای مستقیم و تایپ‌شده گراف.
+4. **Unit Testing Suite:**
+   - تست مسیریابی قطعی به `FAST_TEXT_TABLE_PATH` زمانی که چانک‌های بازیابی‌شده فقط `text` و `table` هستند (`vlm_images_inspected == 0`).
+   - تست مسیریابی قطعی به `VISUAL_VLM_PATH` زمانی که حداقل یک چانک `figure` در Top-5 حضور دارد.
+   - تست سقف حداکثر ۲ تصویر (`vlm_images_inspected == 2`) زمانی که بیش از ۲ چانک `figure` در نتایج بازیابی وجود دارد.
+   - تست `force_visual_route=True` حتی در شرایطی که چانک `figure` در نتایج نباشد.
+   - تست چرخه خوداصلاحگری CRAG: امتیاز اولیه `< 0.35` -> اجرای `rewrite_query_node` (`rewrite_count == 1`) -> بازیابی مجدد با امتیاز بالا -> تولید پاسخ با `rewritten_query` غیرتهی.
+   - تست توقف حلقه CRAG پس از ۱ بار بازنویسی حتی اگر امتیاز باز هم `< 0.35` باقی بماند (`crag_status == CRAGStatus.LOW_CONFIDENCE`).
+   - تست حفظ کامل فیلدهای Attribution (`page_number`, `bounding_box`, `modality`, `image_url`) در خروجی `MultimodalQueryResponse`.
 
 ---
 
 ## 5. Acceptance Criteria & Verification Plan
 
 ### Acceptance Criteria
-- [ ] بازیابی موازی Top-20 از Qdrant (`DenseRetriever`) و Top-20 از `BM25s` (`SparseRetriever`) با `asyncio.gather` پیاده‌سازی شده است.
-- [ ] فیلتر اختیاری `modality_filter` (`"text" | "table" | "figure"`) در هر دو مسیر Dense و Sparse و در `HybridRetriever` پشتیبانی می‌شود.
-- [ ] ادغام نتایج با الگوریتم Reciprocal Rank Fusion ($k=60$) و انتخاب ۱۵ کاندیدای برتر برای بازرتبه‌بندی انجام می‌شود.
-- [ ] بازرتبه‌بندی کاندیداها به Top-5 با `BAAI/bge-reranker-v2-m3` (و `MockReranker` قطعی در محیط بدون GPU/CI) با امتیاز نرمال‌شده در بازه `[0.0, 1.0]` انجام می‌شود.
-- [ ] تمامی فیلدهای Attribution (`page_number`, `bounding_box`, `modality`, `image_path`, `table_html`) بدون تغییر حفظ می‌شوند.
-
-### Verification Commands
-```bash
-pytest tests/unit/test_retrieval.py -v
-ruff check src/retrieval tests/unit/test_retrieval.py
-mypy --strict src/retrieval tests/unit/test_retrieval.py
-```
+- [ ] ماشین وضعیت LangGraph شامل گره‌های `retrieve_node`، `crag_evaluate_node`، `rewrite_query_node`، `fast_text_table_generation_node` و `visual_vlm_generation_node` پیاده‌سازی شده است.
+- [ ] منطق CRAG در صورت `max_rerank_score < 0.35` و `rewrite_count < 1` پرسش را بازنویسی و بازیابی را دقیقاً یک بار تکرار می‌کند.
+- [ ] یال `adaptive_router_edge` پرسش‌های دارای چانک `figure` یا `force_visual_route=True` را به `VISUAL_VLM_PATH` (حداکثر ۲ تصویر) و سایر پرسش‌ها را به `FAST_TEXT_TABLE_PATH` هدایت می‌کند.
+- [ ] خروجی گراف تمامی فیلدهای Attribution (`page_number`, `bounding_box`, `modality`, `image_url`) و زمان‌بندی‌ها (`retrieval_ms`, `rerank_ms`, `generation_ms`, `total_ms`) را طبق قرارداد `MultimodalQueryResponse` حفظ می‌کند.
+- [ ] تمامی تست‌های واحد، بررسی‌های `ruff` و تایپ‌چکینگ `mypy --strict` بدون خطا اجرا می‌شوند.
