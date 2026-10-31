@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 
@@ -13,8 +14,10 @@ from src.common.config import Settings
 from src.common.exceptions import IndexingError
 from src.ingestion.indexer import (
     DENSE_VECTOR_DIM,
+    BGEM3Embedder,
     HybridIndexer,
     MockEmbedder,
+    normalize_bilingual_text,
 )
 from src.schemas.document import BoundingBox, ChunkModality, CoordOrigin, MultimodalChunk
 
@@ -44,7 +47,8 @@ def sample_chunks() -> list[MultimodalChunk]:
         section_title="Benchmark Results",
         content="| Engine | QPS | P99 (ms) |\n| Aurora | 45000 | 38 |",
         table_html=(
-            "<table><tr><th>Engine</th><th>QPS</th></tr><tr><td>Aurora</td><td>45000</td></tr></table>"
+            "<table><tr><th>Engine</th><th>QPS</th></tr>"
+            "<tr><td>Aurora</td><td>45000</td></tr></table>"
         ),
         bounding_box=bbox2,
     )
@@ -199,9 +203,20 @@ async def test_index_chunks_stores_payload_and_sparse_index(
     assert retrieved_fig[0].payload["modality"] == "figure"
     assert retrieved_fig[0].payload["image_path"] == "data/crops/doc_bench_p03_fig01.png"
 
-    # Verify BM25s directory and metadata
+    # Verify BM25s directory and full MultimodalChunk payload in corpus_metadata.json
     assert bm25_dir.exists()
-    assert (bm25_dir / "corpus_metadata.json").exists()
+    metadata_file = bm25_dir / "corpus_metadata.json"
+    assert metadata_file.exists()
+    bm25_records = json.loads(metadata_file.read_text(encoding="utf-8"))
+    assert len(bm25_records) == 4
+    records_by_id = {rec["chunk_id"]: rec for rec in bm25_records}
+    assert records_by_id["doc_bench_p02_tbl01"]["table_html"] is not None
+    assert (
+        records_by_id["doc_bench_p03_fig01"]["image_path"]
+        == "data/crops/doc_bench_p03_fig01.png"
+    )
+    assert records_by_id["doc_bench_p03_fig01"]["bounding_box"]["page"] == 3
+    assert records_by_id["doc_bench_p01_txt01"]["section_title"] == "Overview"
 
     await indexer.close()
 
@@ -298,3 +313,44 @@ async def test_index_chunks_qdrant_error_raises_indexing_error(
 
     with pytest.raises(IndexingError):
         await indexer.index_chunks(sample_chunks)
+
+
+def test_normalize_bilingual_text_handles_persian_variants_and_digits() -> None:
+    """Persian Yeh/Kaf, ZWNJ, and Eastern digits normalize consistently for BM25."""
+    raw = "كلاس\u200cهای دیتابیس در ۲۵۰ اتصال و تاخیر ۱۸.۲ms"
+    normalized = normalize_bilingual_text(raw)
+    assert "کلاس های" in normalized
+    assert "250" in normalized
+    assert "18.2ms" in normalized
+
+
+@pytest.mark.asyncio
+async def test_bge_m3_embedder_runtime_failure_falls_back_to_mock_embedder(
+    in_memory_qdrant: AsyncQdrantClient,
+    sample_chunks: list[MultimodalChunk],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If BGEM3Embedder fails to load at runtime, HybridIndexer falls back to MockEmbedder."""
+    broken_bge = BGEM3Embedder(model_name="nonexistent/bge-m3", device="cpu")
+
+    def _fail_load() -> None:
+        raise IndexingError("Model weights missing")
+
+    monkeypatch.setattr(broken_bge, "_load_model", _fail_load)
+    settings = Settings(
+        environment="development",
+        qdrant_collection="test_bge_fallback",
+        bm25_index_dir=tmp_path / "bm25",
+    )
+    indexer = HybridIndexer(
+        settings=settings,
+        qdrant_client=in_memory_qdrant,
+        embedder=broken_bge,
+    )
+
+    stats = await indexer.index_chunks(sample_chunks[:1])
+    assert stats.indexed_dense == 1
+    assert isinstance(indexer.embedder, MockEmbedder)
+    await indexer.close()
+

@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import importlib.util
 import json
+import re
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
@@ -29,6 +31,52 @@ from src.schemas.document import MultimodalChunk
 logger = get_logger(__name__)
 
 DENSE_VECTOR_DIM: Final[int] = 1024
+
+_PERSIAN_CHAR_MAP: Final[dict[int, str]] = str.maketrans(
+    {
+        "ي": "ی",
+        "ك": "ک",
+        "ۀ": "ه",
+        "\u200c": " ",  # Normalize ZWNJ to space so compound Persian stems tokenize cleanly
+        "۰": "0",
+        "۱": "1",
+        "۲": "2",
+        "۳": "3",
+        "۴": "4",
+        "۵": "5",
+        "۶": "6",
+        "۷": "7",
+        "۸": "8",
+        "۹": "9",
+        "٠": "0",
+        "١": "1",
+        "٢": "2",
+        "٣": "3",
+        "٤": "4",
+        "٥": "5",
+        "٦": "6",
+        "٧": "7",
+        "٨": "8",
+        "٩": "9",
+    }
+)
+_BILINGUAL_TOKEN_PATTERN: Final[str] = r"(?u)\b\w+\b"
+
+
+def normalize_bilingual_text(text: str) -> str:
+    """Normalize Persian/Arabic characters, digits, and ZWNJ for consistent BM25 tokenization."""
+    cleaned = text.translate(_PERSIAN_CHAR_MAP).lower()
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def tokenize_bilingual(texts: Sequence[str]) -> Any:
+    """Tokenize bilingual Persian/English texts and numeric metrics for BM25s."""
+    normalized = [normalize_bilingual_text(t) for t in texts]
+    return bm25s.tokenize(
+        normalized,
+        token_pattern=_BILINGUAL_TOKEN_PATTERN,
+        stopwords="en",
+    )
 
 
 class IndexingStats(BaseModel):
@@ -113,9 +161,9 @@ class BGEM3Embedder(BaseEmbedder):
                 device=self._device,
             )
             return self._model
-        except ImportError as exc:
+        except Exception as exc:
             raise IndexingError(
-                "FlagEmbedding is required for BGEM3Embedder. Install it or use MockEmbedder."
+                f"FlagEmbedding BGE-M3 model could not be loaded: {exc}"
             ) from exc
 
     def _embed_sync(self, texts: list[str]) -> list[list[float]]:
@@ -150,20 +198,22 @@ class HybridIndexer:
         self._collection_name = self._settings.qdrant_collection
         self._bm25_dir = Path(self._settings.bm25_index_dir)
         self._bm25_metadata_file = self._bm25_dir / "corpus_metadata.json"
+        self._bm25_lock = asyncio.Lock()
 
         if embedder is not None:
             self._embedder = embedder
-        elif self._settings.environment == "testing":
+        elif (
+            self._settings.environment == "testing"
+            or importlib.util.find_spec("FlagEmbedding") is None
+        ):
+            if self._settings.environment != "testing":
+                logger.warning("Falling back to MockEmbedder as FlagEmbedding is not installed")
             self._embedder = MockEmbedder(dimension=DENSE_VECTOR_DIM)
         else:
-            try:
-                self._embedder = BGEM3Embedder(
-                    model_name=self._settings.embedding_model_name,
-                    device=self._settings.embedding_device,
-                )
-            except Exception:
-                logger.warning("Falling back to MockEmbedder as FlagEmbedding is unavailable")
-                self._embedder = MockEmbedder(dimension=DENSE_VECTOR_DIM)
+            self._embedder = BGEM3Embedder(
+                model_name=self._settings.embedding_model_name,
+                device=self._settings.embedding_device,
+            )
 
         if qdrant_client is not None:
             self._qdrant_client = qdrant_client
@@ -182,6 +232,19 @@ class HybridIndexer:
     def qdrant_client(self) -> AsyncQdrantClient:
         """The active Qdrant client."""
         return self._qdrant_client
+
+    async def _embed_with_fallback(self, texts: Sequence[str]) -> list[list[float]]:
+        try:
+            return await self._embedder.embed_texts(texts)
+        except Exception as exc:
+            if isinstance(self._embedder, BGEM3Embedder):
+                logger.warning(
+                    "BGEM3Embedder failed at runtime; falling back to MockEmbedder",
+                    extra={"error": str(exc)},
+                )
+                self._embedder = MockEmbedder(dimension=DENSE_VECTOR_DIM)
+                return await self._embedder.embed_texts(texts)
+            raise IndexingError(f"Failed to compute dense embeddings: {exc}") from exc
 
     async def ensure_collection(self) -> None:
         """Ensure the target Qdrant collection and payload indexes exist."""
@@ -236,23 +299,27 @@ class HybridIndexer:
             return []
 
     def _save_bm25_index_sync(self, records: list[dict[str, Any]]) -> None:
-        """Tokenize, index, and save the BM25s sparse index synchronously."""
+        """Tokenize, index, and atomically save the BM25s sparse index synchronously."""
         self._bm25_dir.mkdir(parents=True, exist_ok=True)
         if not records:
             if self._bm25_metadata_file.exists():
                 self._bm25_metadata_file.unlink()
             return
 
-        corpus_texts = [r["content"] for r in records]
-        tokens = bm25s.tokenize(corpus_texts, stopwords="en")
+        corpus_texts = [str(r["content"]) for r in records]
+        tokens = tokenize_bilingual(corpus_texts)
         retriever = bm25s.BM25()
         retriever.index(tokens)
         retriever.save(str(self._bm25_dir), corpus=corpus_texts)
 
-        self._bm25_metadata_file.write_text(
+        tmp_metadata_file = self._bm25_metadata_file.with_name(
+            f"{self._bm25_metadata_file.name}.tmp"
+        )
+        tmp_metadata_file.write_text(
             json.dumps(records, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        tmp_metadata_file.replace(self._bm25_metadata_file)
 
     async def index_chunks(self, chunks: Sequence[MultimodalChunk]) -> IndexingStats:
         """Index a batch of MultimodalChunks into Qdrant and BM25s."""
@@ -262,7 +329,7 @@ class HybridIndexer:
         await self.ensure_collection()
 
         texts = [c.content for c in chunks]
-        dense_vectors = await self._embedder.embed_texts(texts)
+        dense_vectors = await self._embed_with_fallback(texts)
 
         points: list[models.PointStruct] = []
         new_records: list[dict[str, Any]] = []
@@ -270,30 +337,9 @@ class HybridIndexer:
 
         for chunk, vector in zip(chunks, dense_vectors, strict=True):
             point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, chunk.chunk_id))
-            payload = {
-                "chunk_id": chunk.chunk_id,
-                "doc_id": chunk.doc_id,
-                "doc_name": chunk.doc_name,
-                "page_number": chunk.page_number,
-                "modality": chunk.modality.value,
-                "section_title": chunk.section_title,
-                "content": chunk.content,
-                "table_html": chunk.table_html,
-                "image_path": chunk.image_path,
-                "bounding_box": chunk.bounding_box.model_dump(),
-                "ingestion_timestamp": chunk.ingestion_timestamp.isoformat(),
-            }
+            payload = chunk.model_dump(mode="json")
             points.append(models.PointStruct(id=point_id, vector=vector, payload=payload))
-            new_records.append(
-                {
-                    "chunk_id": chunk.chunk_id,
-                    "doc_id": chunk.doc_id,
-                    "doc_name": chunk.doc_name,
-                    "page_number": chunk.page_number,
-                    "modality": chunk.modality.value,
-                    "content": chunk.content,
-                }
-            )
+            new_records.append(payload)
             unique_doc_ids.add(chunk.doc_id)
 
         try:
@@ -305,13 +351,14 @@ class HybridIndexer:
         except Exception as exc:
             raise IndexingError(f"Failed to upsert points into Qdrant: {exc}") from exc
 
-        existing_records = await asyncio.to_thread(self._load_bm25_records_sync)
-        record_map = {r["chunk_id"]: r for r in existing_records}
-        for rec in new_records:
-            record_map[rec["chunk_id"]] = rec
+        async with self._bm25_lock:
+            existing_records = await asyncio.to_thread(self._load_bm25_records_sync)
+            record_map = {str(r["chunk_id"]): r for r in existing_records}
+            for rec in new_records:
+                record_map[str(rec["chunk_id"])] = rec
 
-        merged_records = list(record_map.values())
-        await asyncio.to_thread(self._save_bm25_index_sync, merged_records)
+            merged_records = list(record_map.values())
+            await asyncio.to_thread(self._save_bm25_index_sync, merged_records)
 
         stats = IndexingStats(
             total_chunks=len(chunks),
@@ -336,16 +383,22 @@ class HybridIndexer:
         delete_filter = models.Filter(
             must=[models.FieldCondition(key="doc_id", match=models.MatchValue(value=doc_id))]
         )
-        await self._qdrant_client.delete(
-            collection_name=self._collection_name,
-            points_selector=models.FilterSelector(filter=delete_filter),
-            wait=True,
-        )
+        try:
+            await self._qdrant_client.delete(
+                collection_name=self._collection_name,
+                points_selector=models.FilterSelector(filter=delete_filter),
+                wait=True,
+            )
+        except Exception as exc:
+            raise IndexingError(
+                f"Failed to delete document '{doc_id}' from Qdrant: {exc}"
+            ) from exc
 
-        existing_records = await asyncio.to_thread(self._load_bm25_records_sync)
-        remaining_records = [r for r in existing_records if r.get("doc_id") != doc_id]
-        deleted_count = len(existing_records) - len(remaining_records)
-        await asyncio.to_thread(self._save_bm25_index_sync, remaining_records)
+        async with self._bm25_lock:
+            existing_records = await asyncio.to_thread(self._load_bm25_records_sync)
+            remaining_records = [r for r in existing_records if r.get("doc_id") != doc_id]
+            deleted_count = len(existing_records) - len(remaining_records)
+            await asyncio.to_thread(self._save_bm25_index_sync, remaining_records)
 
         logger.info(
             "Deleted document chunks from hybrid index",

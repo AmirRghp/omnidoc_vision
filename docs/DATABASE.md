@@ -55,6 +55,7 @@ Every point stored in Qdrant adheres to the `MultimodalChunk` contract. Bounding
 To support fast metadata filtering (e.g., filtering only `"table"` or `"figure"` chunks or restricting to a specific `doc_name`), the following Qdrant payload indexes are created at startup:
 - `modality` (`Keyword` index)
 - `doc_name` (`Keyword` index)
+- `doc_id` (`Keyword` index)
 - `page_number` (`Integer` index)
 
 ---

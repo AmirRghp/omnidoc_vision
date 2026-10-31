@@ -19,6 +19,7 @@ from PIL import Image
 from src.common.config import PROJECT_ROOT, Settings, get_settings
 from src.common.exceptions import AssetAccessError
 from src.common.logger import get_logger
+from src.ingestion.docling_parser import clamp_image_dimensions
 from src.schemas.document import ChunkModality, MultimodalChunk
 
 # Decompression bomb defense per docs/SECURITY.md
@@ -48,21 +49,6 @@ DEFAULT_CAPTION_PROMPT: Final[str] = (
 )
 
 
-def clamp_image_dimensions(image: Image.Image, max_dim: int = 1280) -> Image.Image:
-    """Clamp image dimensions preserving aspect ratio so width and height <= max_dim."""
-    if max_dim <= 0:
-        raise ValueError("max_dim must be positive")
-    width, height = image.size
-    if width <= max_dim and height <= max_dim:
-        return image.copy()
-
-    scale = min(max_dim / float(width), max_dim / float(height))
-    new_width = max(1, round(width * scale))
-    new_height = max(1, round(height * scale))
-    rgb_image = image.convert("RGB") if image.mode not in ("RGB", "RGBA", "L") else image
-    return rgb_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-
 def _encode_image_to_base64_sync(image: Image.Image, max_dim: int = 1280) -> str:
     """Clamp image and encode to a Base64-encoded PNG string synchronously."""
     clamped = clamp_image_dimensions(image, max_dim=max_dim)
@@ -71,20 +57,36 @@ def _encode_image_to_base64_sync(image: Image.Image, max_dim: int = 1280) -> str
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
-def _load_pil_image_sync(image_input: Image.Image | Path | str) -> Image.Image:
-    """Load a PIL image from an image object, Path, or string path synchronously."""
+def _load_pil_image_sync(
+    image_input: Image.Image | Path | str,
+    *,
+    allowed_roots: Sequence[Path] | None = None,
+) -> Image.Image:
+    """Load a PIL image from an image object, Path, or string path with traversal guards."""
     if isinstance(image_input, Image.Image):
         return image_input.copy()
 
-    path = Path(image_input)
+    raw_path = Path(image_input)
+    if ".." in raw_path.parts:
+        raise AssetAccessError(f"Path traversal detected in image path: {image_input}")
+
+    path = raw_path
     if not path.is_absolute() and not path.exists():
-        path = PROJECT_ROOT / path
+        path = PROJECT_ROOT / raw_path
 
     if not path.exists() or not path.is_file():
         raise AssetAccessError(f"Image asset does not exist: {path}")
 
+    resolved = path.resolve()
+    if allowed_roots:
+        roots = [root.resolve() for root in allowed_roots]
+        if not any(resolved.is_relative_to(root) for root in roots):
+            raise AssetAccessError(
+                f"Image asset path {resolved} escapes allowed directories"
+            )
+
     try:
-        with Image.open(path) as img:
+        with Image.open(resolved) as img:
             return img.copy()
     except Exception as exc:
         raise AssetAccessError(f"Failed to open image asset {path}: {exc}") from exc
@@ -124,6 +126,9 @@ class VisualCaptioner:
     def offline_mode(self) -> bool:
         """Whether the captioner runs in offline deterministic fallback mode."""
         return self._offline_mode
+
+    def _allowed_asset_roots(self) -> tuple[Path, Path]:
+        return (self._settings.crops_dir, PROJECT_ROOT)
 
     async def encode_image(
         self,
@@ -209,6 +214,10 @@ class VisualCaptioner:
                 max_tokens=self._settings.vlm_max_tokens,
             )
 
+            if not response.choices:
+                logger.warning("Empty choices list from VLM, falling back to deterministic summary")
+                return self._generate_deterministic_fallback(pil_image, metadata)
+
             caption = (response.choices[0].message.content or "").strip()
             if not caption:
                 logger.warning("Empty response from VLM, falling back to deterministic summary")
@@ -221,12 +230,35 @@ class VisualCaptioner:
             )
             return formatted_caption
 
-        except (OpenAIError, OSError, TimeoutError) as exc:
+        except (OpenAIError, OSError, TimeoutError, IndexError) as exc:
             logger.warning(
                 "VLM service unavailable, falling back to deterministic visual caption",
                 extra={"error": str(exc), "metadata": metadata},
             )
             return self._generate_deterministic_fallback(pil_image, metadata)
+
+    def _resolve_chunk_image_path(self, raw_image_path: str) -> Path:
+        raw_path = Path(raw_image_path)
+        if raw_path.is_absolute() or raw_path.anchor or ".." in raw_path.parts:
+            raise AssetAccessError(
+                f"Invalid or unsafe chunk image_path: {raw_image_path}"
+            )
+
+        candidate = self._settings.crops_dir / raw_path.name
+        if candidate.exists() and candidate.is_file():
+            target = candidate
+        elif (PROJECT_ROOT / raw_path).exists():
+            target = PROJECT_ROOT / raw_path
+        else:
+            target = candidate
+
+        resolved = target.resolve()
+        allowed_roots = [root.resolve() for root in self._allowed_asset_roots()]
+        if not any(resolved.is_relative_to(root) for root in allowed_roots):
+            raise AssetAccessError(
+                f"Resolved chunk image_path {resolved} escapes allowed directories"
+            )
+        return resolved
 
     async def caption_chunk(self, chunk: MultimodalChunk) -> MultimodalChunk:
         """Process a MultimodalChunk, enriching FIGURE chunks with technical visual captions."""
@@ -242,20 +274,7 @@ class VisualCaptioner:
             "caption": chunk.content,
         }
 
-        raw_path = Path(chunk.image_path)
-        if raw_path.is_absolute():
-            image_path = raw_path
-        else:
-            candidate = self._settings.crops_dir / raw_path.name
-            if candidate.exists() and candidate.is_file():
-                image_path = candidate
-            elif (PROJECT_ROOT / raw_path).exists():
-                image_path = PROJECT_ROOT / raw_path
-            elif raw_path.exists():
-                image_path = raw_path
-            else:
-                image_path = PROJECT_ROOT / raw_path
-
+        image_path = self._resolve_chunk_image_path(chunk.image_path)
         caption_text = await self.caption_image(image_path, metadata=metadata)
         return chunk.model_copy(update={"content": caption_text})
 

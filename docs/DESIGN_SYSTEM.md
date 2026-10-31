@@ -56,7 +56,7 @@ Whenever a `figure` or `table` crop is retrieved:
 - **Image Container:** Dark slate frame (`#1E293B`), rounded `10px`, subtle zoom-on-click lightbox enabled in Chainlit (`display="inline"`, `size="large"`).
 - **Attribution Footer:**
   - `📄 Document:` `cloud_database_benchmark_2026.pdf`
-  - `📍 Location:` `Page 4  |  BBox: [118.4, 210.0, 542.8, 495.2]`
+  - `📍 Location:` `Page 4  |  BBox: [0.19, 0.285, 0.882, 0.71]`
   - `🏷️ Modality:` `FIGURE (Line Chart)` or `TABLE (Reconstructed 6x5 Matrix)`
 
 ### 5.3 Reconstructed Table View

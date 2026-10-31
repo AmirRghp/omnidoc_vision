@@ -206,12 +206,14 @@ class DoclingParser:
         settings: Settings | None = None,
         *,
         crops_dir: Path | None = None,
-        use_docling: bool = False,
+        use_docling: bool | None = None,
         converter: Any | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.crops_dir = crops_dir if crops_dir is not None else self.settings.crops_dir
-        self.use_docling = use_docling
+        self.use_docling = (
+            use_docling if use_docling is not None else (self.settings.environment != "testing")
+        )
         self._converter = converter
 
     def _validate_pdf(self, pdf_path: Path) -> int:
@@ -363,7 +365,11 @@ class DoclingParser:
                 html_text = self._call_docling_export(item, "export_to_html", doc)
                 if not md_text:
                     md_text = "[TABLE]"
-                if not html_text or "<table" not in html_text.lower():
+                if (
+                    not html_text
+                    or "<table" not in html_text.lower()
+                    or "<script" in html_text.lower()
+                ):
                     html_text = f"<table><tr><td>{html.escape(md_text)}</td></tr></table>"
 
                 chunks.append(

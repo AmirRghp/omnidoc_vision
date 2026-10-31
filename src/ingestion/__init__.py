@@ -12,6 +12,8 @@ from src.ingestion.indexer import (
     HybridIndexer,
     IndexingStats,
     MockEmbedder,
+    normalize_bilingual_text,
+    tokenize_bilingual,
 )
 from src.ingestion.visual_captioner import VisualCaptioner
 
@@ -25,5 +27,7 @@ __all__ = [
     "VisualCaptioner",
     "clamp_image_dimensions",
     "normalize_bbox",
+    "normalize_bilingual_text",
     "reconstruct_table_artifacts",
+    "tokenize_bilingual",
 ]

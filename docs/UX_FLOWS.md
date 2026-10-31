@@ -53,7 +53,7 @@ This document traces the core user and system execution flows in **OmniDoc-Visio
 [Chainlit UI Response]:
        ├── Badge: `[⚡ Route: Fast Text/Table Path | 234ms | Score: 0.93]`
        ├── Grounded Persian Answer with exact numbers from the table
-       └── Expandable Citation Card showing the reconstructed Markdown table + `[Page 2 | BBox: 85, 190, 510, 410]`
+       └── Expandable Citation Card showing the reconstructed Markdown table + `[Page 2 | BBox: 0.14, 0.22, 0.85, 0.49]`
 ```
 
 ---
@@ -80,7 +80,7 @@ This document traces the core user and system execution flows in **OmniDoc-Visio
 [Chainlit UI Response]:
        ├── Badge: `[👁️ Route: Visual VLM Path | 915ms | 1 Chart Inspected]`
        ├── Detailed Persian explanation pinpointing the inflection point at 250 concurrent connections
-       └── Inline `cl.Image` rendering `dist_p4_fig1.png` + Attribution Footer (`Page 4 | BBox: [110, 260, 530, 590]`)
+       └── Inline `cl.Image` rendering `dist_p4_fig1.png` + Attribution Footer (`Page 4 | BBox: [0.19, 0.285, 0.882, 0.71]`)
 ```
 
 ---

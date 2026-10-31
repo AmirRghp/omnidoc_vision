@@ -157,7 +157,14 @@ omnidoc-vision/
 │       └── routes.py                       # FastAPI endpoints (/ingest, /query, /crops/{filename})
 ├── tests/
 │   ├── unit/
+│   │   ├── test_benchmark_generator.py     # Benchmark corpus & dataset contract tests
+│   │   ├── test_config.py                  # Settings & environment validation tests
 │   │   ├── test_docling_parser.py          # Table & BBox extraction unit tests
+│   │   ├── test_indexer.py                 # Qdrant + BM25s hybrid indexer unit tests
+│   │   ├── test_logger.py                  # Structured JSON logging & redaction tests
+│   │   ├── test_packaging.py               # Manifest & dependency alignment guards
+│   │   ├── test_schemas.py                 # MultimodalChunk & API schema contract tests
+│   │   ├── test_visual_captioner.py        # Approach A VLM captioner & fallback tests
 │   │   ├── test_adaptive_router.py         # Fast Path vs Visual Path routing logic tests
 │   │   └── test_noise_transforms.py        # Synthetic PDF/image noise generator tests
 │   └── integration/
