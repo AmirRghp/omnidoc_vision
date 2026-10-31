@@ -1,0 +1,609 @@
+{
+  "version": "1.0",
+  "description": "Bilingual golden QA dataset for the OmniDoc-Vision benchmark PDFs.",
+  "documents": [
+    {
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "page_count": 5,
+      "topics": [
+        "managed PostgreSQL",
+        "throughput",
+        "P99 latency",
+        "connection pooling"
+      ]
+    },
+    {
+      "doc_name": "distributed_cache_architecture.pdf",
+      "page_count": 5,
+      "topics": [
+        "cache topology",
+        "eviction policies",
+        "replication",
+        "capacity"
+      ]
+    },
+    {
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "page_count": 5,
+      "topics": [
+        "AWQ",
+        "FP16",
+        "VRAM",
+        "batch latency",
+        "GPU capacity"
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "cloud_tbl_01",
+      "category": "table",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        2
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "In Table 1, what is the cache-on throughput of Aurora PostgreSQL db.r7g.4xlarge at 64 threads?",
+        "fa": "در جدول ۱، توان عملیاتی حالت کش‌فعال برای Aurora PostgreSQL با کلاس db.r7g.4xlarge در ۶۴ رشته چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "18,400 ops/sec",
+        "fa": "۱۸٬۴۰۰ عملیات بر ثانیه"
+      }
+    },
+    {
+      "id": "cloud_tbl_02",
+      "category": "table",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        2
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "How much memory does the Aurora PostgreSQL db.r7g.4xlarge instance have?",
+        "fa": "حافظه نمونه Aurora PostgreSQL db.r7g.4xlarge چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "128 GB",
+        "fa": "۱۲۸ گیگابایت"
+      }
+    },
+    {
+      "id": "cloud_tbl_03",
+      "category": "table",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        2
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "What is the cache-on P95 latency of Cloud SQL Enterprise at 64 threads?",
+        "fa": "تاخیر P95 حالت کش‌فعال برای Cloud SQL Enterprise در ۶۴ رشته چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "18.2 ms",
+        "fa": "۱۸٫۲ میلی‌ثانیه"
+      }
+    },
+    {
+      "id": "cloud_tbl_04",
+      "category": "table",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "What is the maximum connection count for Aurora PostgreSQL with the transaction pooler?",
+        "fa": "حداکثر تعداد اتصال برای Aurora PostgreSQL با pooler تراکنشی چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "5,000 connections",
+        "fa": "۵٬۰۰۰ اتصال"
+      }
+    },
+    {
+      "id": "cloud_fig_01",
+      "category": "visual",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        3
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "At how many concurrent connections does Standard RDS first exceed 500 ms P99 write latency?",
+        "fa": "در چه تعداد اتصال هم‌زمان، تاخیر نوشتن P99 برای Standard RDS برای اولین بار از ۵۰۰ میلی‌ثانیه عبور می‌کند؟"
+      },
+      "ground_truth": {
+        "en": "250 concurrent connections",
+        "fa": "۲۵۰ اتصال هم‌زمان"
+      }
+    },
+    {
+      "id": "cloud_fig_02",
+      "category": "visual",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        3
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "What is Aurora PostgreSQL's P99 write latency at 500 concurrent connections?",
+        "fa": "تاخیر نوشتن P99 برای Aurora PostgreSQL در ۵۰۰ اتصال هم‌زمان چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "44 ms",
+        "fa": "۴۴ میلی‌ثانیه"
+      }
+    },
+    {
+      "id": "cloud_fig_03",
+      "category": "visual",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        4
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "At what thread-pool size does Aurora PostgreSQL reach its peak read throughput, and what is that peak?",
+        "fa": "Aurora PostgreSQL در چه اندازه‌ای از thread pool به اوج توان عملیاتی خواندن می‌رسد و این اوج چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "At 64 threads, with 18,400 ops/sec",
+        "fa": "در ۶۴ رشته، با ۱۸٬۴۰۰ عملیات بر ثانیه"
+      }
+    },
+    {
+      "id": "cloud_txt_01",
+      "category": "text",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "What read/write workload mix does the benchmark use?",
+        "fa": "ترکیب بار کاری خواندن/نوشتن در این بنچمارک چیست؟"
+      },
+      "ground_truth": {
+        "en": "70% reads and 30% writes",
+        "fa": "۷۰٪ خواندن و ۳۰٪ نوشتن"
+      }
+    },
+    {
+      "id": "cloud_txt_02",
+      "category": "text",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "How many repeated runs are executed for each configuration?",
+        "fa": "برای هر پیکربندی چند اجرای تکراری انجام می‌شود؟"
+      },
+      "ground_truth": {
+        "en": "10 runs per configuration",
+        "fa": "۱۰ اجرا برای هر پیکربندی"
+      }
+    },
+    {
+      "id": "cloud_txt_03",
+      "category": "text",
+      "doc_name": "cloud_database_benchmark_2026.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "Which managed PostgreSQL engine is recommended for sustained 64-thread write workloads?",
+        "fa": "برای بارهای نوشتن پیوسته با ۶۴ رشته، کدام موتور PostgreSQL مدیریت‌شده توصیه می‌شود؟"
+      },
+      "ground_truth": {
+        "en": "Aurora PostgreSQL",
+        "fa": "Aurora PostgreSQL"
+      }
+    },
+    {
+      "id": "cache_tbl_01",
+      "category": "table",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        3
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "In Table 1, what is the LFU hit ratio with a 256 GB cache?",
+        "fa": "در جدول ۱، نسبت اصابت (hit ratio) سیاست LFU با کش ۲۵۶ گیگابایتی چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "96.3%",
+        "fa": "۹۶٫۳٪"
+      }
+    },
+    {
+      "id": "cache_tbl_02",
+      "category": "table",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        3
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "What is the P99 latency of the TTL eviction policy?",
+        "fa": "تاخیر P99 سیاست حذف TTL چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "280 microseconds",
+        "fa": "۲۸۰ میکروثانیه"
+      }
+    },
+    {
+      "id": "cache_tbl_03",
+      "category": "table",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "What read throughput does the six-shard cluster support?",
+        "fa": "خوشه شش‌شارده چه توان عملیاتی خواندن را پشتیبانی می‌کند؟"
+      },
+      "ground_truth": {
+        "en": "360k ops/sec",
+        "fa": "۳۶۰ هزار عملیات بر ثانیه"
+      }
+    },
+    {
+      "id": "cache_fig_01",
+      "category": "visual",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        2
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "How many cache shards are shown in the cluster topology?",
+        "fa": "در دیاگرام توپولوژی خوشه، چند شارد کش نمایش داده شده است؟"
+      },
+      "ground_truth": {
+        "en": "6 cache shards",
+        "fa": "۶ شارد کش"
+      }
+    },
+    {
+      "id": "cache_fig_02",
+      "category": "visual",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        2
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "What replication factor does the cluster use across availability zones?",
+        "fa": "خوشه در منطقه‌های دسترس‌پذیری از چه ضریب تکثیری استفاده می‌کند؟"
+      },
+      "ground_truth": {
+        "en": "Replication factor 2 (RF=2) across 3 AZs",
+        "fa": "ضریب تکثیر ۲ (RF=2) در ۳ منطقه دسترس‌پذیری"
+      }
+    },
+    {
+      "id": "cache_fig_03",
+      "category": "visual",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        4
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "Which eviction policy has the highest hit ratio at a 256 GB cache size?",
+        "fa": "کدام سیاست حذف در اندازه کش ۲۵۶ گیگابایت بالاترین نسبت اصابت را دارد؟"
+      },
+      "ground_truth": {
+        "en": "LFU, at 96.3%",
+        "fa": "LFU، با ۹۶٫۳٪"
+      }
+    },
+    {
+      "id": "cache_fig_04",
+      "category": "visual",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        4
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "What is the LRU hit ratio at a 64 GB cache size?",
+        "fa": "نسبت اصابت LRU در اندازه کش ۶۴ گیگابایت چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "88.4%",
+        "fa": "۸۸٫۴٪"
+      }
+    },
+    {
+      "id": "cache_txt_01",
+      "category": "text",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "What consistency model does the cache cluster provide?",
+        "fa": "خوشه کش چه مدل سازگاری ارائه می‌دهد؟"
+      },
+      "ground_truth": {
+        "en": "Eventual consistency with CRDT counters",
+        "fa": "سازگاری نهایی (eventual consistency) با شمارنده‌های CRDT"
+      }
+    },
+    {
+      "id": "cache_txt_02",
+      "category": "text",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "What is the default eviction policy?",
+        "fa": "سیاست حذف پیش‌فرض چیست؟"
+      },
+      "ground_truth": {
+        "en": "LFU (least frequently used)",
+        "fa": "LFU (کم‌استفاده‌ترین)"
+      }
+    },
+    {
+      "id": "cache_txt_03",
+      "category": "text",
+      "doc_name": "distributed_cache_architecture.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "Which client protocol does the cache expose?",
+        "fa": "کش چه پروتکل کلاینتی را ارائه می‌دهد؟"
+      },
+      "ground_truth": {
+        "en": "RESP3 over TLS/mTLS",
+        "fa": "RESP3 روی TLS/mTLS"
+      }
+    },
+    {
+      "id": "gpu_tbl_01",
+      "category": "table",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        3
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "In the batch-size matrix, what is AWQ P95 latency at batch size 4?",
+        "fa": "در ماتریس اندازه batch، تاخیر P95 حالت AWQ در batch size ۴ چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "390 ms",
+        "fa": "۳۹۰ میلی‌ثانیه"
+      }
+    },
+    {
+      "id": "gpu_tbl_02",
+      "category": "table",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        3
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "What throughput does FP16 achieve at batch size 8?",
+        "fa": "حالت FP16 در batch size ۸ چه توان عملیاتی دارد؟"
+      },
+      "ground_truth": {
+        "en": "2,120 tokens/sec",
+        "fa": "۲٬۱۲۰ توکن بر ثانیه"
+      }
+    },
+    {
+      "id": "gpu_tbl_03",
+      "category": "table",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_modalities": [
+        "table"
+      ],
+      "question": {
+        "en": "For a 24 GB GPU, what is the maximum number of concurrent requests?",
+        "fa": "برای GPU با ۲۴ گیگابایت حافظه، حداکثر تعداد درخواست‌های هم‌زمان چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "64 concurrent requests",
+        "fa": "۶۴ درخواست هم‌زمان"
+      }
+    },
+    {
+      "id": "gpu_fig_01",
+      "category": "visual",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        2
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "How much VRAM does AWQ use at batch size 8?",
+        "fa": "حالت AWQ در batch size ۸ چقدر VRAM مصرف می‌کند؟"
+      },
+      "ground_truth": {
+        "en": "9.4 GB",
+        "fa": "۹٫۴ گیگابایت"
+      }
+    },
+    {
+      "id": "gpu_fig_02",
+      "category": "visual",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        2
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "What is the projected FP16 VRAM footprint at batch size 16, and does it fit a 16 GB GPU?",
+        "fa": "مصرف تخمینی VRAM در حالت FP16 برای batch size ۱۶ چقدر است و آیا در GPU با ۱۶ گیگابایت جا می‌شود؟"
+      },
+      "ground_truth": {
+        "en": "19.6 GB, which exceeds the 16 GB limit (OOM)",
+        "fa": "۱۹٫۶ گیگابایت، که از محدودیت ۱۶ گیگابایت فراتر می‌رود (OOM)"
+      }
+    },
+    {
+      "id": "gpu_fig_03",
+      "category": "visual",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        4
+      ],
+      "expected_modalities": [
+        "figure"
+      ],
+      "question": {
+        "en": "At which batch size does AWQ P95 latency first exceed 500 ms?",
+        "fa": "در چه batch size‌ای تاخیر P95 حالت AWQ برای اولین بار از ۵۰۰ میلی‌ثانیه عبور می‌کند؟"
+      },
+      "ground_truth": {
+        "en": "Batch size 8 (560 ms)",
+        "fa": "batch size ۸ (۵۶۰ میلی‌ثانیه)"
+      }
+    },
+    {
+      "id": "gpu_txt_01",
+      "category": "text",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "How many measured requests follow the 50 warm-up requests?",
+        "fa": "پس از ۵۰ درخواست گرم‌کردن، چند درخواست اندازه‌گیری می‌شود؟"
+      },
+      "ground_truth": {
+        "en": "500 measured requests",
+        "fa": "۵۰۰ درخواست اندازه‌گیری‌شده"
+      }
+    },
+    {
+      "id": "gpu_txt_02",
+      "category": "text",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        1
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "What are the maximum model length and image limit per request used in the benchmark?",
+        "fa": "حداکثر طول مدل و محدودیت تصویر برای هر درخواست در این بنچمارک چقدر است؟"
+      },
+      "ground_truth": {
+        "en": "8,192 tokens and at most 2 images per request",
+        "fa": "۸٬۱۹۲ توکن و حداکثر ۲ تصویر برای هر درخواست"
+      }
+    },
+    {
+      "id": "gpu_txt_03",
+      "category": "text",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "Which serving configuration is recommended for a 16 GB VRAM budget?",
+        "fa": "برای بودجه ۱۶ گیگابایت VRAM کدام پیکربندی سرویس‌دهی توصیه می‌شود؟"
+      },
+      "ground_truth": {
+        "en": "AWQ 4-bit with a maximum batch size of 8",
+        "fa": "AWQ 4-bit با حداکثر batch size برابر ۸"
+      }
+    },
+    {
+      "id": "gpu_txt_04",
+      "category": "text",
+      "doc_name": "gpu_inference_capacity_report.pdf",
+      "expected_pages": [
+        5
+      ],
+      "expected_modalities": [
+        "text"
+      ],
+      "question": {
+        "en": "What happens to FP16 at batch size 16 on a 16 GB GPU?",
+        "fa": "در GPU با ۱۶ گیگابایت، حالت FP16 در batch size ۱۶ چه وضعیتی پیدا می‌کند؟"
+      },
+      "ground_truth": {
+        "en": "It exceeds 16 GB and runs out of memory (OOM)",
+        "fa": "از ۱۶ گیگابایت فراتر می‌رود و با کمبود حافظه (OOM) مواجه می‌شود"
+      }
+    }
+  ]
+}
