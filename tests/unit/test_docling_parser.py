@@ -101,8 +101,7 @@ def test_parse_all_three_benchmark_pdfs_preserves_expected_modalities(
     for pdf_name in (CLOUD_PDF, CACHE_PDF, GPU_PDF):
         chunks = parser.parse_pdf(benchmark_pdfs / pdf_name)
         by_modality = {
-            modality: [c for c in chunks if c.modality is modality]
-            for modality in ChunkModality
+            modality: [c for c in chunks if c.modality is modality] for modality in ChunkModality
         }
         assert len(by_modality[ChunkModality.TEXT]) >= 3, pdf_name
         assert len(by_modality[ChunkModality.TABLE]) >= 2, pdf_name

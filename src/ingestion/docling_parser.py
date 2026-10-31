@@ -419,9 +419,7 @@ class DoclingParser:
                 idx = counters.get((page_no, ChunkModality.TEXT), 0) + 1
                 counters[(page_no, ChunkModality.TEXT)] = idx
                 chunk_id = f"{doc_id}_p{page_no:02d}_txt{idx:02d}"
-                formatted_text = (
-                    f"{current_section}\n{text_val}" if current_section else text_val
-                )
+                formatted_text = f"{current_section}\n{text_val}" if current_section else text_val
                 chunks.append(
                     MultimodalChunk(
                         chunk_id=chunk_id,
@@ -483,11 +481,7 @@ class DoclingParser:
         bottom = float(getattr(bbox_obj, "b", page_height))
         origin_attr = getattr(bbox_obj, "coord_origin", None)
         origin_name = str(getattr(origin_attr, "name", origin_attr or "TOPLEFT")).upper()
-        origin = (
-            CoordOrigin.BOTTOMLEFT
-            if "BOTTOM" in origin_name
-            else CoordOrigin.TOPLEFT
-        )
+        origin = CoordOrigin.BOTTOMLEFT if "BOTTOM" in origin_name else CoordOrigin.TOPLEFT
         return normalize_bbox(
             (left, top, right, bottom),
             page_width=page_width,
@@ -532,14 +526,10 @@ class DoclingParser:
 
                 section_title = self._detect_section_title(lines)
                 figure_captions = [
-                    line["text"]
-                    for line in lines
-                    if _FIGURE_CAPTION_RE.match(line["text"])
+                    line["text"] for line in lines if _FIGURE_CAPTION_RE.match(line["text"])
                 ]
                 table_captions = [
-                    line["text"]
-                    for line in lines
-                    if _TABLE_CAPTION_RE.match(line["text"])
+                    line["text"] for line in lines if _TABLE_CAPTION_RE.match(line["text"])
                 ]
 
                 # 1. Reading-order text chunk(s) on this page
@@ -583,9 +573,7 @@ class DoclingParser:
                     ):
                         continue
                     caption = (
-                        table_captions[tbl_idx - 1]
-                        if tbl_idx - 1 < len(table_captions)
-                        else None
+                        table_captions[tbl_idx - 1] if tbl_idx - 1 < len(table_captions) else None
                     )
                     md_table, html_table = reconstruct_table_artifacts(
                         raw_rows,

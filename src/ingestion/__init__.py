@@ -6,9 +6,11 @@ from src.ingestion.docling_parser import (
     normalize_bbox,
     reconstruct_table_artifacts,
 )
+from src.ingestion.visual_captioner import VisualCaptioner
 
 __all__ = [
     "DoclingParser",
+    "VisualCaptioner",
     "clamp_image_dimensions",
     "normalize_bbox",
     "reconstruct_table_artifacts",
