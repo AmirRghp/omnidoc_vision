@@ -1,0 +1,179 @@
+# ==============================================================================
+# OmniDoc-Vision One-Command Stack (Qdrant, Redis, Langfuse, Auto-Ingest, API, UI)
+# ==============================================================================
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.11.3
+    container_name: omnidoc-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: omnidoc-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: omnidoc-langfuse-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-langfuse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-langfuse}
+      POSTGRES_DB: ${POSTGRES_DB:-langfuse}
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-langfuse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: omnidoc-langfuse
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-langfuse}:${POSTGRES_PASSWORD:-langfuse}@langfuse-db:5432/${POSTGRES_DB:-langfuse}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-omnidoc-vision-local-dev-secret}
+      SALT: ${SALT:-omnidoc-vision-local-dev-salt}
+      NEXTAUTH_URL: http://localhost:3001
+      TELEMETRY_ENABLED: "false"
+    restart: unless-stopped
+
+  init-ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omnidoc-init-ingest
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-omnidoc_vision_chunks}
+      REDIS_URL: redis://redis:6379/0
+      VLM_BASE_URL: ${VLM_BASE_URL:-http://host.docker.internal:8000/v1}
+      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+      DOCLING_DEVICE: ${DOCLING_DEVICE:-cpu}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      RERANKER_DEVICE: ${RERANKER_DEVICE:-cpu}
+    volumes:
+      - ./data:/app/data
+    command:
+      - python
+      - -c
+      - |
+        import asyncio
+        from scripts.build_benchmark_pdfs import main as build_pdfs
+        from src.common.config import get_settings
+        from src.ingestion.docling_parser import DoclingParser
+        from src.ingestion.visual_captioner import VisualCaptioner
+        from src.ingestion.indexer import HybridIndexer
+
+        async def bootstrap() -> None:
+            build_pdfs()
+            settings = get_settings()
+            parser = DoclingParser(settings=settings, crops_dir=settings.crops_dir, use_docling=False)
+            captioner = VisualCaptioner(settings=settings, offline_mode=True)
+            indexer = HybridIndexer(settings=settings)
+            all_chunks = []
+            try:
+                for pdf_path in sorted(settings.raw_pdfs_dir.glob("*.pdf")):
+                    parsed = await parser.aparse_pdf(pdf_path)
+                    captioned = await captioner.caption_chunks(parsed)
+                    all_chunks.extend(captioned)
+                await indexer.index_chunks(all_chunks)
+            finally:
+                await indexer.close()
+
+        asyncio.run(bootstrap())
+    restart: "no"
+
+  omnidoc-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omnidoc-api
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init-ingest:
+        condition: service_completed_successfully
+    ports:
+      - "8001:8001"
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      HOST: 0.0.0.0
+      PORT: 8001
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-omnidoc_vision_chunks}
+      REDIS_URL: redis://redis:6379/0
+      VLM_BASE_URL: ${VLM_BASE_URL:-http://host.docker.internal:8000/v1}
+      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+      DOCLING_DEVICE: ${DOCLING_DEVICE:-cpu}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      RERANKER_DEVICE: ${RERANKER_DEVICE:-cpu}
+    volumes:
+      - ./data:/app/data
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
+    restart: unless-stopped
+
+  omnidoc-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omnidoc-ui
+    depends_on:
+      omnidoc-api:
+        condition: service_started
+      init-ingest:
+        condition: service_completed_successfully
+    ports:
+      - "8002:8002"
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-omnidoc_vision_chunks}
+      REDIS_URL: redis://redis:6379/0
+      VLM_BASE_URL: ${VLM_BASE_URL:-http://host.docker.internal:8000/v1}
+      VLM_MODEL_NAME: ${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+    volumes:
+      - ./data:/app/data
+    command: ["chainlit", "run", "app.py", "--host", "0.0.0.0", "--port", "8002"]
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  redis_data:
+  langfuse_postgres_data:

@@ -58,3 +58,45 @@ def test_env_template_does_not_share_api_and_vllm_port() -> None:
 
     assert values["PORT"] == "8001"
     assert ":8000/" in values["VLM_BASE_URL"]
+
+
+def test_docker_and_compose_configs_include_auto_ingest_and_services() -> None:
+    dockerfile_path = PROJECT_ROOT / "Dockerfile"
+    compose_path = PROJECT_ROOT / "docker-compose.yml"
+
+    assert dockerfile_path.is_file()
+    assert compose_path.is_file()
+
+    dockerfile_text = dockerfile_path.read_text(encoding="utf-8")
+    assert "FROM python:3.11-slim" in dockerfile_text
+    assert "USER omnidoc" in dockerfile_text
+    assert "HEALTHCHECK" in dockerfile_text
+
+    compose_text = compose_path.read_text(encoding="utf-8")
+    for required_service in ("qdrant:", "redis:", "langfuse:", "init-ingest:", "omnidoc-api:"):
+        assert required_service in compose_text
+    assert "build_benchmark_pdfs" in compose_text
+    assert "service_completed_successfully" in compose_text
+
+
+def test_github_actions_ci_workflow_runs_ruff_mypy_and_pytest() -> None:
+    ci_path = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
+    assert ci_path.is_file()
+
+    ci_text = ci_path.read_text(encoding="utf-8")
+    assert "ruff check ." in ci_text
+    assert "mypy src" in ci_text
+    assert "pytest" in ci_text
+
+
+def test_portfolio_readme_contains_trilogy_links_vram_benchmarks_and_limitations() -> None:
+    readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+
+    for repo_name in ("omnidoc-rag", "omniops-sre-agent", "omnidoc-vision"):
+        assert repo_name in readme_text
+
+    assert "16GB VRAM" in readme_text
+    assert "Three-Way Multimodal Ablation" in readme_text
+    assert "Document Degradation & Noise Robustness" in readme_text
+    assert "Limitations & Failure Modes" in readme_text
+
