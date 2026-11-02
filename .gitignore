@@ -26,6 +26,7 @@ venv.bak/
 # IDE and editors
 .vscode/
 .idea/
+.aistudio/
 *.swp
 *.swo
 
