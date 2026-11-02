@@ -6,7 +6,7 @@
 [![CI Pipeline](https://img.shields.io/badge/CI-Ruff%20%7C%20Mypy%20%7C%20Pytest-10B981?style=flat-square)](#گیت‌های-کیفی-و-اعتبارسنجی)
 [![VRAM Budget](https://img.shields.io/badge/Hardware_Budget-%E2%89%A416GB_VRAM-6366F1?style=flat-square)](#بودجه-سخت‌افزاری-۱۶-گیگابایت-vram-و-راهبرد-تخصیص-حافظه)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3B82F6?style=flat-square)](#راه‌اندازی-سریع-با-داکر-کامپوز)
-[![License](https://img.shields.io/badge/License-Apache_2.0-F59E0B?style=flat-square)](#مجوز)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 **OmniDoc-Vision** یک پلتفرم آماده تولید، صنعتی و دوزبانه (فارسی و انگلیسی) در حوزه **ادراک اسناد چندوجهی و بازیابی بصری تطبیقی (Visual RAG)** است. این سامانه به‌طور اختصاصی برای استخراج ساختاریافته، شاخص‌گذاری، بازیابی هیبریدی و استدلال تصویری روی فایل‌های پیچیده PDF مهندسی (شامل جداول چندسطحی با سلول‌های ادغام‌شده، دیاگرام‌های معماری نرم‌افزار و نمودارهای تله‌متری و تاخیر P99) طراحی شده و تمامی اجزای آن به‌راحتی در سقف حافظه **یک کارت گرافیک ۱۶ گیگابایت VRAM** اجرا می‌شوند.
 
@@ -290,4 +290,4 @@ python -m pip wheel . --no-deps -w dist
 
 ## مجوز (License)
 
-این پروژه تحت مجوز **Apache-2.0** منتشر شده است.
+این پروژه تحت مجوز **MIT** منتشر شده است.

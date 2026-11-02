@@ -5,7 +5,7 @@
 [![CI Pipeline](https://img.shields.io/badge/CI-Ruff%20%7C%20Mypy%20%7C%20Pytest-10B981?style=flat-square)](#quality-gates--verification)
 [![VRAM Budget](https://img.shields.io/badge/Hardware_Budget-%E2%89%A416GB_VRAM-6366F1?style=flat-square)](#16gb-vram-hardware-budget--allocation-strategy)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3B82F6?style=flat-square)](#quick-start-zero-setup-docker-compose)
-[![License](https://img.shields.io/badge/License-Apache_2.0-F59E0B?style=flat-square)](#license)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 **OmniDoc-Vision** is a production-grade, bilingual (Persian/English) **Multimodal Document Intelligence and Adaptive Visual RAG** platform engineered to extract, index, retrieve, and reason over complex technical PDFs containing multi-header merged-cell tables, system architecture diagrams, and P99 latency/throughput telemetry charts—all running comfortably within a **single 16GB VRAM GPU ceiling**.
 
@@ -292,4 +292,4 @@ python -m pip wheel . --no-deps -w dist
 
 ## License
 
-Apache-2.0
+MIT
