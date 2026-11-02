@@ -1,5 +1,7 @@
 # OmniDoc-Vision — Multimodal Document Intelligence & Adaptive Visual RAG
 
+[English](README.md) | [فارسی](README.fa.md)
+
 [![CI Pipeline](https://img.shields.io/badge/CI-Ruff%20%7C%20Mypy%20%7C%20Pytest-10B981?style=flat-square)](#quality-gates--verification)
 [![VRAM Budget](https://img.shields.io/badge/Hardware_Budget-%E2%89%A416GB_VRAM-6366F1?style=flat-square)](#16gb-vram-hardware-budget--allocation-strategy)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3B82F6?style=flat-square)](#quick-start-zero-setup-docker-compose)
